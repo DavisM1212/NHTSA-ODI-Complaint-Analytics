@@ -95,7 +95,7 @@ def detect_delimiter(file_path):
     return delimiter
 
 
-def read_tabular_file(file_path):
+def read_tabular_file(file_path, header="infer", column_names=None):
     file_path = Path(file_path)
     delimiter = detect_delimiter(file_path)
     encodings = ["utf-8", "latin-1"]
@@ -103,14 +103,21 @@ def read_tabular_file(file_path):
 
     for encoding in encodings:
         try:
-            return pd.read_csv(
-                file_path,
-                sep=delimiter,
-                dtype=str,
-                low_memory=False,
-                encoding=encoding,
-                on_bad_lines="skip",
-            )
+            read_kwargs = {
+                "sep": delimiter,
+                "dtype": str,
+                "low_memory": False,
+                "encoding": encoding,
+                "on_bad_lines": "skip"
+            }
+
+            if header != "infer":
+                read_kwargs["header"] = header
+
+            if column_names is not None:
+                read_kwargs["names"] = list(column_names)
+
+            return pd.read_csv(file_path, **read_kwargs)
         except Exception as exc:
             last_error = exc
 

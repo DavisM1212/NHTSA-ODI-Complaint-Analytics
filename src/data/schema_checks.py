@@ -205,6 +205,25 @@ def _schema_catalog():
     return {"schemas": catalog, "errors": errors}
 
 
+def get_schema_spec(schema_name):
+    catalog_info = _schema_catalog()
+    if schema_name in catalog_info["errors"]:
+        raise RuntimeError(
+            f"Schema '{schema_name}' could not be parsed: {catalog_info['errors'][schema_name]}"
+        )
+    if schema_name not in catalog_info["schemas"]:
+        available = sorted(catalog_info["schemas"].keys())
+        raise KeyError(
+            f"Schema '{schema_name}' not found (available: {available})"
+        )
+    return catalog_info["schemas"][schema_name]
+
+
+def get_schema_columns(schema_name):
+    schema_spec = get_schema_spec(schema_name)
+    return list(schema_spec["expected_columns"])
+
+
 def _detect_schema_name(columns):
     column_set = set(columns)
     catalog = _schema_catalog()["schemas"]

@@ -56,6 +56,8 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- run_pipeline_windows.ps1
 |   |-- run_pipeline_mac_linux.sh
 |   `-- verify_install.py
+|-- notebooks/
+|   `-- EDA.ipynb
 `-- src/
     |-- __init__.py
     |-- config/
@@ -197,6 +199,15 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - macOS/Linux pipeline runner
 - Runs verification and then the complaint extraction/preprocessing pipeline
 
+### `notebooks/` (interactive, cell-by-cell exploration)
+
+`notebooks/EDA.ipynb`
+
+- Starter Jupyter notebook for manual EDA in the VS Code editor (good for people who prefer Colab-style workflows)
+- Loads processed files from `data/processed/` into pandas DataFrames
+- Creates a default DataFrame named `df` (prefers the combined complaints dataset)
+- Safe place to explore columns, filters, groupbys, and charts without using the command line
+
 ### `src/` ("source" folder, contains main Python files grouped by objective)
 
 `src/__init__.py` and `src/<package>/__init__.py`
@@ -261,7 +272,8 @@ If you are unsure where to start:
 2. Run the setup script in `scripts/`
 3. Run the pipeline script in `scripts/`
 4. Inspect outputs in `data/processed/`
-5. Only then start editing code in `src/`
+5. Explore data in `notebooks/EDA.ipynb`
+6. Only then start editing code in `src/`
 
 ## Setup Tutorial
 

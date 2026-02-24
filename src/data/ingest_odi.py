@@ -15,13 +15,16 @@ from src.config.paths import (
 from src.data.io_utils import (
     discover_zip_files,
     minor_preprocess_complaints,
-    normalize_columns,
     read_tabular_file,
     safe_extract_zip,
     sanitize_name,
     write_dataframe,
 )
-from src.data.schema_checks import collect_schema_report, print_schema_report
+from src.data.schema_checks import (
+    collect_schema_report,
+    get_schema_columns,
+    print_schema_report,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -41,13 +44,21 @@ def tabular_candidates(extracted_paths):
 
 
 def process_table_file(table_path, source_zip_name, output_format):
-    df = read_tabular_file(table_path)
-    df = normalize_columns(df)
+    complaint_columns = get_schema_columns("complaints")
+    df = read_tabular_file(
+        table_path,
+        header=None,
+        column_names=complaint_columns,
+    )
     df = minor_preprocess_complaints(df)
     df["source_zip"] = source_zip_name
     df["source_file"] = table_path.name
 
-    report = collect_schema_report(df, dataset_name=table_path.name)
+    report = collect_schema_report(
+        df,
+        dataset_name=table_path.name,
+        schema_name="complaints",
+    )
     print_schema_report(report)
 
     source_zip_stem = Path(source_zip_name).stem
