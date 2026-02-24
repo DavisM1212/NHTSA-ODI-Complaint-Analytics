@@ -1,0 +1,14 @@
+{
+	// List of extensions which should be recommended for users of this workspace.
+	"recommendations": [
+		"ms-python.python",
+		"ms-python.vscode-pylance",
+		"ms-toolsai.datawrangler",
+		"charliermarsh.ruff",
+		"mechatroner.rainbow-csv"
+	],
+	// List of extensions recommended by VS Code that should not be recommended for users of this workspace.
+	"unwantedRecommendations": [
+		"ms-python.autopep8"
+	]
+}
