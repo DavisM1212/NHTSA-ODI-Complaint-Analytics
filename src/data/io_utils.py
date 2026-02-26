@@ -54,7 +54,7 @@ def safe_extract_zip(zip_path, target_dir, overwrite=False):
 
             with (
                 archive.open(member, "r") as source_handle,
-                destination.open("wb") as destination_handle,
+                destination.open("wb") as destination_handle
             ):
                 shutil.copyfileobj(source_handle, destination_handle)
 
@@ -74,11 +74,12 @@ def detect_delimiter(file_path):
         return "\t"
 
     lines = [line for line in sample.splitlines() if line.strip()]
+    # The first line is usually the least chaotic place to guess a delimiter
     header = lines[0] if lines else sample
     header_counts = {
         "\t": header.count("\t"),
         "|": header.count("|"),
-        ",": header.count(","),
+        ",": header.count(",")
     }
     header_delimiter = max(header_counts, key=header_counts.get)
     if header_counts[header_delimiter] > 0:
@@ -87,7 +88,7 @@ def detect_delimiter(file_path):
     sample_counts = {
         "\t": sample.count("\t"),
         "|": sample.count("|"),
-        ",": sample.count(","),
+        ",": sample.count(",")
     }
     delimiter = max(sample_counts, key=sample_counts.get)
     if sample_counts[delimiter] == 0:
@@ -122,23 +123,6 @@ def read_tabular_file(file_path, header="infer", column_names=None):
             last_error = exc
 
     raise RuntimeError(f"Unable to read {file_path} as a tabular file") from last_error
-
-
-def normalize_columns(df):
-    normalized = []
-    seen = {}
-    for column in df.columns:
-        text = str(column).strip().lower()
-        text = re.sub(r"[^a-z0-9]+", "_", text)
-        text = text.strip("_") or "column"
-        count = seen.get(text, 0)
-        new_name = f"{text}_{count + 1}" if count else text
-        seen[text] = count + 1
-        normalized.append(new_name)
-
-    renamed_df = df.copy()
-    renamed_df.columns = normalized
-    return renamed_df
 
 
 def minor_preprocess_complaints(df):

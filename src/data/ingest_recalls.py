@@ -25,7 +25,7 @@ def parse_args():
         "--overwrite-extracted",
         action="store_true",
         default=settings.OVERWRITE_EXTRACTED,
-        help="Re-extract files even if they already exist",
+        help="Re-extract files even if they already exist"
     )
     return parser.parse_args()
 
@@ -53,7 +53,7 @@ def main():
                     "source_zip": zip_path.name,
                     "extracted_file": str(
                         Path(extracted_path).relative_to(EXTRACTED_DATA_DIR.parent)
-                    ),
+                    )
                 }
             )
 

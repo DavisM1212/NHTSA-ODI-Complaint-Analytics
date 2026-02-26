@@ -10,7 +10,7 @@ OVERWRITE_EXTRACTED = os.getenv("ODI_OVERWRITE_EXTRACTED", "false").strip().lowe
     "1",
     "true",
     "yes",
-    "y",
+    "y"
 }
 COMBINE_PROCESSED_OUTPUTS = os.getenv(
     "ODI_COMBINE_PROCESSED", "true"

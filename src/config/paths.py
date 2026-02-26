@@ -26,11 +26,7 @@ def ensure_project_directories():
         PROCESSED_DATA_DIR,
         OUTPUTS_DIR,
         SRC_DIR,
-        SCRIPTS_DIR,
+        SCRIPTS_DIR
     ]
     for path in required_dirs:
         path.mkdir(parents=True, exist_ok=True)
-
-
-def project_path(*parts):
-    return PROJECT_ROOT.joinpath(*parts)

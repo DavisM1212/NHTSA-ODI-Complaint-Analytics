@@ -19,26 +19,26 @@ BRACKET_CODES_PATTERN = re.compile(r"\[([A-Z0-9,\s/]+)\]")
 
 SCHEMA_DOCS = {"complaints": DOCS_DIR / "CMPL.txt", "recalls": DOCS_DIR / "RCL.txt"}
 
-SCHEMA_OPTIONAL_COLUMNS = {
+OPT_COLS = {
     "complaints": set(),
-    "recalls": {"do_not_drive", "park_outside"},
+    "recalls": {"do_not_drive", "park_outside"}
 }
 
-SCHEMA_DATE_COLUMNS_OVERRIDES = {
+DATE_COL_OVR = {
     "complaints": {"faildate", "datea", "ldate", "purch_dt", "manuf_dt"},
-    "recalls": {"bgman", "endman", "odate", "rcdate", "datea"},
+    "recalls": {"bgman", "endman", "odate", "rcdate", "datea"}
 }
 
-SCHEMA_ENUM_OVERRIDES = {"recalls": {"influenced_by": {"MFR", "OVSC", "ODI"}}}
+ENUM_OVR = {"recalls": {"influenced_by": {"MFR", "OVSC", "ODI"}}}
 
-SCHEMA_LENGTH_OVERRIDES = {
+LEN_OVR = {
     "recalls": {
         # Field changed in 2025; allow slightly larger legacy values without failing
         "fmvss": 6
     }
 }
 
-ALLOWED_PIPELINE_EXTRA_COLUMNS = {"source_zip", "source_file"}
+EXTRA_PIPE_COLS = {"source_zip", "source_file"}
 
 
 # -----------------------------------------------------------------------------
@@ -81,11 +81,6 @@ def _extract_codes_from_line(line):
     return codes
 
 
-def _is_probably_blank_line(line):
-    stripped = line.strip()
-    return stripped == "" or set(stripped) <= {"=", "-"}
-
-
 # -----------------------------------------------------------------------------
 # Schema doc parsing
 # -----------------------------------------------------------------------------
@@ -108,7 +103,8 @@ def _parse_schema_doc(doc_path, schema_name):
         if not in_field_section:
             continue
 
-        if _is_probably_blank_line(line):
+        stripped = line.strip()
+        if stripped == "" or set(stripped) <= {"=", "-"}:
             continue
 
         row_match = FIELD_ROW_PATTERN.match(line)
@@ -126,7 +122,7 @@ def _parse_schema_doc(doc_path, schema_name):
                 "type": field_type,
                 "size": field_size,
                 "description_lines": [],
-                "allowed_codes": [],
+                "allowed_codes": []
             }
             if description_line:
                 current_field["description_lines"].append(description_line)
@@ -153,7 +149,7 @@ def _parse_schema_doc(doc_path, schema_name):
     for field in sorted(fields, key=lambda item: item["index"]):
         description_text = " ".join(field["description_lines"]).strip()
         allowed_codes = sorted({code for code in field["allowed_codes"] if code})
-        is_date = field["name"] in SCHEMA_DATE_COLUMNS_OVERRIDES.get(schema_name, set())
+        is_date = field["name"] in DATE_COL_OVR.get(schema_name, set())
         if "YYYYMMDD" in description_text.upper():
             is_date = True
 
@@ -171,12 +167,12 @@ def _parse_schema_doc(doc_path, schema_name):
                 "description": description_text,
                 "is_date": is_date,
                 "is_yes_no": is_yes_no,
-                "allowed_codes": allowed_codes,
+                "allowed_codes": allowed_codes
             }
         )
 
     expected_columns = [field["name"] for field in normalized_fields]
-    optional_columns = SCHEMA_OPTIONAL_COLUMNS.get(schema_name, set())
+    optional_columns = OPT_COLS.get(schema_name, set())
     required_columns = [
         name for name in expected_columns if name not in optional_columns
     ]
@@ -188,7 +184,7 @@ def _parse_schema_doc(doc_path, schema_name):
         "field_map": {field["name"]: field for field in normalized_fields},
         "expected_columns": expected_columns,
         "required_columns": required_columns,
-        "optional_columns": sorted(optional_columns),
+        "optional_columns": sorted(optional_columns)
     }
 
 
@@ -230,7 +226,6 @@ def _detect_schema_name(columns):
 
     best_schema_name = None
     best_score = 0.0
-    best_overlap = 0
 
     for schema_name, schema_spec in catalog.items():
         expected_set = set(schema_spec["expected_columns"])
@@ -238,13 +233,12 @@ def _detect_schema_name(columns):
         score = overlap / max(len(expected_set), 1)
         if score > best_score:
             best_score = score
-            best_overlap = overlap
             best_schema_name = schema_name
 
     if best_score < 0.35:
-        return None, best_score, best_overlap
+        return None, best_score
 
-    return best_schema_name, best_score, best_overlap
+    return best_schema_name, best_score
 
 
 # -----------------------------------------------------------------------------
@@ -252,8 +246,8 @@ def _detect_schema_name(columns):
 # -----------------------------------------------------------------------------
 def _allowed_values_for_field(schema_name, field):
     override_values = (
-        SCHEMA_ENUM_OVERRIDES.get(schema_name, {}).get(field["name"])
-        if schema_name in SCHEMA_ENUM_OVERRIDES
+        ENUM_OVR.get(schema_name, {}).get(field["name"])
+        if schema_name in ENUM_OVR
         else None
     )
     if override_values:
@@ -274,7 +268,7 @@ def _validate_date_field(series):
         "non_null_count": 0,
         "placeholder_zero_count": 0,
         "invalid_date_count": 0,
-        "invalid_examples": [],
+        "invalid_examples": []
     }
 
     if is_datetime64_any_dtype(series):
@@ -315,7 +309,7 @@ def _validate_numeric_field(series, max_digits):
         "non_numeric_count": 0,
         "non_integer_count": 0,
         "digits_overflow_count": 0,
-        "invalid_examples": [],
+        "invalid_examples": []
     }
 
     text = _clean_text_series(series)
@@ -365,7 +359,7 @@ def _validate_char_length(series, max_length, allow_datetime=False):
         "checked": True,
         "non_null_count": 0,
         "too_long_count": 0,
-        "max_observed_length": 0,
+        "max_observed_length": 0
     }
 
     if allow_datetime and is_datetime64_any_dtype(series):
@@ -392,7 +386,7 @@ def _validate_enum_field(series, allowed_values):
         "checked": True,
         "non_null_count": 0,
         "invalid_value_count": 0,
-        "invalid_examples": [],
+        "invalid_examples": []
     }
 
     if not allowed_values:
@@ -417,24 +411,6 @@ def _validate_enum_field(series, allowed_values):
         result["invalid_examples"] = examples[:8]
 
     return result
-
-
-def _find_id_column(df):
-    for column in COMMON_ODI_COMPLAINT_ID_COLUMNS:
-        if column in df.columns:
-            return column
-    if "record_id" in df.columns:
-        return "record_id"
-    return None
-
-
-def _find_model_year_column(df):
-    if "yeartxt" in df.columns:
-        return "yeartxt"
-    for column in MODEL_YEAR_COLUMN_CANDIDATES:
-        if column in df.columns:
-            return column
-    return None
 
 
 # -----------------------------------------------------------------------------
@@ -469,10 +445,10 @@ def collect_schema_report(df, dataset_name, schema_name=None):
             "numeric_non_integer_total": 0,
             "numeric_digits_overflow_total": 0,
             "char_length_overflow_total": 0,
-            "enum_invalid_total": 0,
+            "enum_invalid_total": 0
         },
         "warnings": [],
-        "errors": [],
+        "errors": []
     }
 
     catalog_info = _schema_catalog()
@@ -484,17 +460,13 @@ def collect_schema_report(df, dataset_name, schema_name=None):
             )
 
     if schema_name is None:
-        detected_schema_name, match_score, overlap_count = _detect_schema_name(
-            df.columns.tolist()
-        )
+        detected_schema_name, match_score = _detect_schema_name(df.columns.tolist())
     else:
         detected_schema_name = schema_name
         if schema_name in catalog:
             expected_set = set(catalog[schema_name]["expected_columns"])
-            overlap_count = len(expected_set & set(df.columns))
-            match_score = overlap_count / max(len(expected_set), 1)
+            match_score = len(expected_set & set(df.columns)) / max(len(expected_set), 1)
         else:
-            overlap_count = 0
             match_score = 0.0
 
     report["schema_name"] = detected_schema_name
@@ -506,7 +478,6 @@ def collect_schema_report(df, dataset_name, schema_name=None):
 
         expected_columns = schema_spec["expected_columns"]
         expected_set = set(expected_columns)
-        optional_set = set(schema_spec["optional_columns"])  # noqa: F841
 
         present_expected = [
             column for column in expected_columns if column in df.columns
@@ -525,7 +496,7 @@ def collect_schema_report(df, dataset_name, schema_name=None):
         unexpected_extra_columns = [
             column
             for column in extra_columns
-            if column not in ALLOWED_PIPELINE_EXTRA_COLUMNS
+            if column not in EXTRA_PIPE_COLS
         ]
 
         actual_expected_order = [
@@ -557,7 +528,7 @@ def collect_schema_report(df, dataset_name, schema_name=None):
             )
 
         field_map = schema_spec["field_map"]
-        schema_length_overrides = SCHEMA_LENGTH_OVERRIDES.get(detected_schema_name, {})
+        len_ovr = LEN_OVR.get(detected_schema_name, {})
 
         for column_name in present_expected:
             field = field_map[column_name]
@@ -610,13 +581,11 @@ def collect_schema_report(df, dataset_name, schema_name=None):
                     )
 
             if field["type"] == "CHAR":
-                allowed_max_length = schema_length_overrides.get(
-                    column_name, field["size"]
-                )
+                allowed_max_length = len_ovr.get(column_name, field["size"])
                 char_report = _validate_char_length(
                     series,
                     allowed_max_length,
-                    allow_datetime=field.get("is_date", False),
+                    allow_datetime=field.get("is_date", False)
                 )
                 column_report["char_length"] = char_report
                 report["field_issue_counts"]["char_length_overflow_total"] += (
@@ -657,14 +626,27 @@ def collect_schema_report(df, dataset_name, schema_name=None):
                 "Could not confidently match dataset columns to complaints or recalls schema"
             )
 
-    id_column = _find_id_column(df)
+    id_column = None
+    for col in COMMON_ODI_COMPLAINT_ID_COLUMNS:
+        if col in df.columns:
+            id_column = col
+            break
+    if id_column is None and "record_id" in df.columns:
+        id_column = "record_id"
     if id_column:
         report["id_column_found"] = id_column
         report["id_null_count"] = int(df[id_column].isna().sum())
         if len(df) <= 1000000:
             report["id_duplicate_count"] = int(df[id_column].duplicated().sum())
 
-    model_year_column = _find_model_year_column(df)
+    model_year_column = None
+    if "yeartxt" in df.columns:
+        model_year_column = "yeartxt"
+    else:
+        for col in MODEL_YEAR_COLUMN_CANDIDATES:
+            if col in df.columns:
+                model_year_column = col
+                break
     if model_year_column:
         report["model_year_column_found"] = model_year_column
         values = pd.to_numeric(df[model_year_column], errors="coerce")

@@ -424,7 +424,7 @@ Preferred complaint filenames for team consistency:
 - `data/raw/COMPLAINTS_RECEIVED_2020-2024.zip`
 - `data/raw/COMPLAINTS_RECEIVED_2025-2026.zip`
 
-The current ingestion script also accepts complaint zip files whose names contain `"complaint"`.
+The ingestion script expects these standard complaint zip filenames exactly.
 
 Optional recall files may also be stored in `data/raw/` for later join work. A starter recall extraction script placeholder exists in `src/data/ingest_recalls.py`.
 

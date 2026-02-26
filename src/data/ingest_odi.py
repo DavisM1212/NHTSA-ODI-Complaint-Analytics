@@ -14,7 +14,6 @@ from src.config.paths import (
     ensure_project_directories,
 )
 from src.data.io_utils import (
-    discover_zip_files,
     minor_preprocess_complaints,
     read_tabular_file,
     safe_extract_zip,
@@ -32,16 +31,13 @@ from src.data.schema_checks import (
 # Discovery and processing
 # -----------------------------------------------------------------------------
 def find_complaint_zip_files():
-    expected_paths = []
+    # Keep ingest predictable: if the exact zip names are there, use them and move on
+    zip_paths = []
     for file_name in EXPECTED_COMPLAINT_ZIP_NAMES:
         path = RAW_DATA_DIR / file_name
         if path.exists():
-            expected_paths.append(path)
-
-    if expected_paths:
-        return expected_paths
-
-    return discover_zip_files(RAW_DATA_DIR, include_terms=["complaint"])
+            zip_paths.append(path)
+    return zip_paths
 
 
 def tabular_candidates(extracted_paths):
@@ -58,7 +54,7 @@ def process_table_file(table_path, source_zip_name, output_format):
     df = read_tabular_file(
         table_path,
         header=None,
-        column_names=complaint_columns,
+        column_names=complaint_columns
     )
     df = minor_preprocess_complaints(df)
     df["source_zip"] = source_zip_name
@@ -67,7 +63,7 @@ def process_table_file(table_path, source_zip_name, output_format):
     report = collect_schema_report(
         df,
         dataset_name=table_path.name,
-        schema_name="complaints",
+        schema_name="complaints"
     )
     print_schema_report(report)
 
@@ -82,7 +78,7 @@ def process_table_file(table_path, source_zip_name, output_format):
         "source_file": table_path.name,
         "rows": int(len(df)),
         "columns": int(len(df.columns)),
-        "processed_output": str(output_path.relative_to(PROCESSED_DATA_DIR.parent)),
+        "processed_output": str(output_path.relative_to(PROCESSED_DATA_DIR.parent))
     }
     return df, output_path, manifest_row
 
@@ -128,19 +124,19 @@ def parse_args():
         default=settings.OUTPUT_FORMAT
         if settings.OUTPUT_FORMAT in {"parquet", "csv"}
         else "parquet",
-        help="Preferred processed output format",
+        help="Preferred processed output format"
     )
     parser.add_argument(
         "--overwrite-extracted",
         action="store_true",
         default=settings.OVERWRITE_EXTRACTED,
-        help="Re-extract files even if they already exist under data/extracted",
+        help="Re-extract files even if they already exist under data/extracted"
     )
     parser.add_argument(
         "--no-combine",
         action="store_true",
         default=not settings.COMBINE_PROCESSED_OUTPUTS,
-        help="Skip creating a combined complaint dataset",
+        help="Skip creating a combined complaint dataset"
     )
     return parser.parse_args()
 
@@ -169,7 +165,7 @@ def main():
         frames, manifest_rows = process_zip_file(
             zip_path,
             overwrite_extracted=args.overwrite_extracted,
-            output_format=args.output_format,
+            output_format=args.output_format
         )
         all_manifest_rows.extend(manifest_rows)
         if not args.no_combine:
@@ -189,7 +185,7 @@ def main():
         combined_output = write_dataframe(
             combined_df,
             PROCESSED_DATA_DIR / settings.COMBINED_COMPLAINT_OUTPUT_STEM,
-            prefer_parquet=args.output_format == "parquet",
+            prefer_parquet=args.output_format == "parquet"
         )
         summary_path = OUTPUTS_DIR / "odi_complaints_combined_summary.csv"
         summary_df = pd.DataFrame(
@@ -199,7 +195,7 @@ def main():
                     "columns": int(len(combined_df.columns)),
                     "processed_output": str(
                         combined_output.relative_to(PROCESSED_DATA_DIR.parent)
-                    ),
+                    )
                 }
             ]
         )

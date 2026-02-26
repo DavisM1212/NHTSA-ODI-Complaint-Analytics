@@ -17,16 +17,16 @@ REQUIRED_DIRS = [
     "data/processed",
     "data/outputs",
     "src",
-    "scripts",
+    "scripts"
 ]
 
 REQUIRED_IMPORTS = ["pandas", "numpy", "sklearn", "matplotlib", "pyarrow"]
 
 OPTIONAL_IMPORTS = ["seaborn"]
 
-COMPLAINT_ZIP_NAME_CANDIDATES = [
+EXPECTED_COMPLAINT_ZIPS = [
     "COMPLAINTS_RECEIVED_2020-2024.zip",
-    "COMPLAINTS_RECEIVED_2025-2026.zip",
+    "COMPLAINTS_RECEIVED_2025-2026.zip"
 ]
 
 
@@ -110,23 +110,17 @@ def check_raw_data(results):
         )
         return
 
-    complaint_zip_matches = [name for name in zip_files if "complaint" in name.lower()]
-    if complaint_zip_matches:
-        results["passes"].append(
-            f"Complaint zip(s) found: {', '.join(complaint_zip_matches)}"
+    # Fail fast here so teammates get one clear action instead of chasing mystery errors later
+    missing_expected = [name for name in EXPECTED_COMPLAINT_ZIPS if name not in zip_files]
+    if missing_expected:
+        results["failures"].append(
+            f"Missing expected complaint zip(s): {', '.join(missing_expected)}"
         )
-    else:
-        results["warnings"].append(
-            "Zip files exist in data/raw, but no complaint zip names were detected"
-        )
+        return
 
-    missing_named_candidates = [
-        name for name in COMPLAINT_ZIP_NAME_CANDIDATES if name not in zip_files
-    ]
-    if len(missing_named_candidates) == len(COMPLAINT_ZIP_NAME_CANDIDATES):
-        results["warnings"].append(
-            "Complaint zip filenames differ from README examples (this is okay if names still contain 'complaint')"
-        )
+    results["passes"].append(
+        f"Complaint zip(s) found: {', '.join(EXPECTED_COMPLAINT_ZIPS)}"
+    )
 
 
 def check_output_write_access(results):
