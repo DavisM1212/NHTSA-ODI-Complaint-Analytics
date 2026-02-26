@@ -106,7 +106,7 @@ def check_raw_data(results):
     if not zip_files:
         results["failures"].append("No zip files found in data/raw")
         results["actions"].append(
-            "Place NHTSA ODI complaint zip files in data/raw (for example complaints_2020_2024.zip)"
+            "Place NHTSA ODI complaint zip files in data/raw (for example COMPLAINTS_RECEIVED_2020-2024.zip)"
         )
         return
 

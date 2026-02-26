@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import settings
+from src.config.constants import EXPECTED_COMPLAINT_ZIP_NAMES
 from src.config.paths import (
     EXTRACTED_DATA_DIR,
     OUTPUTS_DIR,
@@ -31,6 +32,15 @@ from src.data.schema_checks import (
 # Discovery and processing
 # -----------------------------------------------------------------------------
 def find_complaint_zip_files():
+    expected_paths = []
+    for file_name in EXPECTED_COMPLAINT_ZIP_NAMES:
+        path = RAW_DATA_DIR / file_name
+        if path.exists():
+            expected_paths.append(path)
+
+    if expected_paths:
+        return expected_paths
+
     return discover_zip_files(RAW_DATA_DIR, include_terms=["complaint"])
 
 
@@ -61,8 +71,7 @@ def process_table_file(table_path, source_zip_name, output_format):
     )
     print_schema_report(report)
 
-    source_zip_stem = Path(source_zip_name).stem
-    base_name = sanitize_name(f"{source_zip_stem}_{table_path.stem}_processed")
+    base_name = sanitize_name(f"{table_path.stem}_processed")
     output_stem = PROCESSED_DATA_DIR / base_name
     output_path = write_dataframe(
         df, output_stem, prefer_parquet=output_format == "parquet"
@@ -80,7 +89,7 @@ def process_table_file(table_path, source_zip_name, output_format):
 
 def process_zip_file(zip_path, overwrite_extracted=False, output_format="parquet"):
     zip_path = Path(zip_path)
-    extract_dir = EXTRACTED_DATA_DIR / sanitize_name(zip_path.stem)
+    extract_dir = EXTRACTED_DATA_DIR
     print("")
     print(f"[extract] {zip_path.name} -> {extract_dir}")
     extracted_paths = safe_extract_zip(
@@ -144,7 +153,7 @@ def main():
     if not zip_files:
         print("[error] No complaint zip files found in data/raw")
         print(
-            "[hint] Add complaint zip files such as complaints_2020_2024.zip and complaints_2025_2026.zip"
+            "[hint] Add complaint zip files such as COMPLAINTS_RECEIVED_2020-2024.zip and COMPLAINTS_RECEIVED_2025-2026.zip"
         )
         return 1
 

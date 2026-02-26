@@ -10,7 +10,7 @@
         "source.organizeImports.ruff": "explicit"
     },
     "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true,
+    "files.insertFinalNewline": false,
     "files.exclude": {
         "**/__pycache__": true,
         "**/.pytest_cache": true,

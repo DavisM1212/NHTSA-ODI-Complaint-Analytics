@@ -11,7 +11,7 @@ from src.config.paths import (
     RAW_DATA_DIR,
     ensure_project_directories,
 )
-from src.data.io_utils import discover_zip_files, safe_extract_zip, sanitize_name
+from src.data.io_utils import discover_zip_files, safe_extract_zip
 
 
 # -----------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def main():
 
     manifest_rows = []
     for zip_path in recall_zips:
-        extract_dir = EXTRACTED_DATA_DIR / sanitize_name(zip_path.stem)
+        extract_dir = EXTRACTED_DATA_DIR
         print(f"[extract] {zip_path.name} -> {extract_dir}")
         extracted_paths = safe_extract_zip(
             zip_path, extract_dir, overwrite=args.overwrite_extracted

@@ -11,14 +11,12 @@ DEFAULT_RANDOM_SEED = 42
 # -----------------------------------------------------------------------------
 EXPECTED_COMPLAINT_ZIP_NAMES = [
     "COMPLAINTS_RECEIVED_2020-2024.zip",
-    "COMPLAINTS_RECEIVED_2025-2026.zip",
+    "COMPLAINTS_RECEIVED_2025-2026.zip"
 ]
-
-ALTERNATE_COMPLAINT_ZIP_NAMES = ["complaints_2020_2024.zip", "complaints_2025_2026.zip"]
-
-EXPECTED_RECALL_ZIP_NAMES = ["RCL_FROM_2020_2024.zip", "RCL_FROM_2025_2026.zip"]
-
-ALTERNATE_RECALL_ZIP_NAMES = ["rcl_from_2020_2024.zip", "rcl_from_2025_2026.zip"]
+EXPECTED_RECALL_ZIP_NAMES = [
+    "RCL_FROM_2020_2024.zip",
+    "RCL_FROM_2025_2026.zip"
+]
 
 
 # -----------------------------------------------------------------------------
