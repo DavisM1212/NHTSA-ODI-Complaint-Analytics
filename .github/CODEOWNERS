@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------------
+# Default ownership
+# -----------------------------------------------------------------------------
+* @DavisM1212
+
+# -----------------------------------------------------------------------------
+# Integrity-sensitive paths
+# -----------------------------------------------------------------------------
+/.github/ @DavisM1212
+/.gitattributes @DavisM1212
+/.gitignore @DavisM1212
+/README.md @DavisM1212
+/requirements.txt @DavisM1212
+/scripts/ @DavisM1212
+/src/config/ @DavisM1212
+/data/raw/ @DavisM1212
+/notebooks/ @DavisM1212

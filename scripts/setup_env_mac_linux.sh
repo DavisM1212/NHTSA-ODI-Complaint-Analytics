@@ -111,6 +111,9 @@ print_step "Upgrading pip"
 print_step "Installing requirements.txt"
 ".venv/bin/python" -m pip install -r requirements.txt
 
+print_step "Installing local git filters"
+".venv/bin/python" scripts/install_git_filters.py
+
 print_step "Running install verification"
 set +e
 ".venv/bin/python" scripts/verify_install.py
@@ -121,6 +124,7 @@ printf '\n'
 if [[ $VERIFY_EXIT_CODE -eq 0 ]]; then
   printf 'Setup completed successfully\n'
   printf 'Next step: ./scripts/run_pipeline_mac_linux.sh\n'
+  printf 'Exploration notebooks listed in .gitattributes will be auto-cleared on commit\n'
 else
   printf 'Setup completed with verification failures\n'
   printf 'Review the messages above, fix the issues, then rerun this script\n'

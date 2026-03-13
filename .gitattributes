@@ -7,6 +7,10 @@
 *.md text eol=lf
 *.toml text eol=lf
 *.json text eol=lf
+*.ipynb text eol=lf
+
+# Exploration notebooks listed here are auto-cleared on commit
+notebooks/EDA.ipynb filter=notebookstrip
 
 *.zip binary
 *.parquet binary

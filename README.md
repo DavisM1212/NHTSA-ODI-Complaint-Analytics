@@ -37,6 +37,11 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |-- pyproject.toml
 |-- .gitignore
 |-- .gitattributes
+|-- .github/
+|   |-- CODEOWNERS
+|   |-- pull_request_template.md
+|   `-- workflows/
+|       `-- pr-ci.yml
 |-- .vscode/
 |   |-- extensions.json
 |   `-- settings.json
@@ -46,7 +51,7 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- screenshots/
 |   `-- ...
 |-- data/
-|   |-- raw/         # committed source zips (complaints, optional recalls)
+|   |-- raw/         # committed source zips + checksum manifest
 |   |-- extracted/   # local extracted txt/csv files (ignored)
 |   |-- processed/   # local parquet/csv outputs (ignored)
 |   `-- outputs/     # local run summaries/manifests
@@ -55,7 +60,9 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- setup_env_mac_linux.sh
 |   |-- run_pipeline_windows.ps1
 |   |-- run_pipeline_mac_linux.sh
-|   `-- verify_install.py
+|   |-- verify_install.py
+|   |-- install_git_filters.py
+|   `-- git_notebook_filter.py
 |-- notebooks/
 |   `-- EDA.ipynb
 `-- src/
@@ -111,6 +118,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Helps normalize line endings across Windows/macOS/Linux and marks binary files
 - Reduces noisy diffs and cross-platform Git issues
+- Also marks selected exploration notebooks for automatic output clearing on commit
 
 ### `.vscode/` (team editor defaults)
 
@@ -124,6 +132,24 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Workspace-level VS Code settings for consistent behavior (format on save, search excludes, Python defaults)
 - Windows interpreter path is preconfigured for `.venv\\Scripts\\python.exe`
 - macOS/Linux teammates should select `.venv/bin/python` manually
+
+### `.github/` (repo guardrails and review workflow)
+
+`.github/CODEOWNERS`
+
+- Assigns the team lead as the default code owner across the repo
+- Supports required code-owner review
+
+`.github/pull_request_template.md`
+
+- Gives teammates a standard PR checklist
+- Reminds everyone to avoid generated outputs and handle raw-data changes carefully
+- Not strictly necessary for minor pull requests such as continued exploration updates, those can be commit messages
+
+`.github/workflows/pr-ci.yml`
+
+- GitHub Actions workflow that runs lightweight repo checks on PRs and on pushes to `main`
+- Installs dependencies, runs setup verification, checks raw-data hashes/notebook hygiene, and compiles Python files
 
 ### `.venv/` (local Python environment)
 
@@ -153,6 +179,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Immutable source zip files
 - Store complaint zips here (and optional recall zips later)
 - Do not manually edit or overwrite these files
+- `SHA256SUMS.txt` stores the approved hashes for committed raw source files
 
 `data/extracted/`
 
@@ -188,6 +215,22 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Setup diagnostic script
 - Checks Python version, imports, required folders, raw zip presence, and write access
+
+`scripts/install_git_filters.py`
+
+- Installs the repo's local Git filters after environment setup
+- Enables automatic output clearing on commit for exploration notebooks listed in `.gitattributes`
+
+`scripts/git_notebook_filter.py`
+
+- Lightweight Git clean/smudge filter used for selected exploration notebooks
+- Leaves report/presentation notebooks untouched unless you explicitly mark them in `.gitattributes`
+
+`scripts/check_repo_integrity.py`
+
+- Repo hygiene script used locally and in GitHub Actions
+- Verifies committed raw zip hashes against `data/raw/SHA256SUMS.txt`
+- Checks that exploration notebooks marked in `.gitattributes` are committed with cleared outputs
 
 `scripts/run_pipeline_windows.ps1`
 
@@ -312,7 +355,7 @@ If you do not see a prompt:
 
 ### 3) Run the environment setup script
 
-The setup scripts try to automate Python detection/installation, virtual environment creation, dependency install, and setup verification. Use the terminal pane (defaults to bottom of window) to run the scripts. If there is no terminal window, select Terminal -> New Terminal from the toolbar in the top-left corner.
+The setup scripts try to automate Python detection/installation, virtual environment creation, dependency install, setup verification, and local Git filter setup for exploration notebooks. Use the terminal pane (defaults to bottom of window) to run the scripts. If there is no terminal window, select Terminal -> New Terminal from the toolbar in the top-left corner.
 
 #### Windows (PowerShell)
 
@@ -380,6 +423,20 @@ What `scripts/verify_install.py` checks:
 - presence of zip files in `data/raw/`
 - write access to `data/outputs/`
 
+If you skipped the setup script and created the environment manually, run this once to enable automatic output clearing for exploration notebooks:
+
+#### Windows
+
+```powershell
+.\.venv\Scripts\python.exe scripts\install_git_filters.py
+```
+
+#### macOS / Linux
+
+```bash
+.venv/bin/python scripts/install_git_filters.py
+```
+
 ### 6) Activate the virtual environment
 
 The setup scripts install dependencies using the venv Python directly, but if you want to run commands interactively (Jupyter, scripts, notebooks), activate the venv in your terminal. This is something you will need to do each time you fully close VS Code/your terminal if you want to run commands from the terminal.
@@ -431,6 +488,7 @@ Optional recall files may also be stored in `data/raw/` for later join work. A s
 Important local-processing design choices:
 
 - raw zip files are committed and preserved as source data
+- raw zip integrity is tracked in `data/raw/SHA256SUMS.txt`
 - extraction happens locally into `data/extracted/`
 - processed outputs are written locally to `data/processed/`
 - run manifests/summaries are written locally to `data/outputs/`
@@ -698,3 +756,15 @@ Use these rules to reduce merge conflicts and lost work in a class group setting
 6. Do not commit `data/extracted/`, `data/processed/`, or `data/outputs/` artifacts
 7. If you change shared schemas or feature logic, document the change in your PR/commit message
 8. Pull again before pushing if you were working for a while
+9. If you add a pure exploration notebook, mark it in `.gitattributes` so outputs are auto-cleared on commit
+
+## Repo Guardrails
+
+These repo-side guardrails are part of the workflow:
+
+- `CODEOWNERS` assigns the team lead as the default code owner across the repo
+- PRs use a shared checklist through `.github/pull_request_template.md`
+- GitHub Actions runs `.github/workflows/pr-ci.yml` on PRs and on `main`
+- `scripts/check_repo_integrity.py` checks raw zip hashes and notebook hygiene
+- Exploration notebooks listed in `.gitattributes` are auto-cleared on commit
+- Report/presentation notebooks can keep outputs by default

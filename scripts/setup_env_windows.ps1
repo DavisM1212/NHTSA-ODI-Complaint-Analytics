@@ -130,6 +130,9 @@ Write-Step "Upgrading pip"
 Write-Step "Installing requirements.txt"
 & $VenvPython -m pip install -r requirements.txt
 
+Write-Step "Installing local git filters"
+& $VenvPython scripts\install_git_filters.py
+
 Write-Step "Running install verification"
 & $VenvPython scripts\\verify_install.py
 $verifyExitCode = $LASTEXITCODE
@@ -138,6 +141,7 @@ Write-Host ""
 if ($verifyExitCode -eq 0) {
     Write-Host "Setup completed successfully"
     Write-Host "Next step: .\\scripts\\run_pipeline_windows.ps1"
+    Write-Host "Exploration notebooks listed in .gitattributes will be auto-cleared on commit"
 }
 else {
     Write-Host "Setup completed with verification failures"
