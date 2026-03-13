@@ -60,3 +60,4 @@ checkpoints/
 !data/raw/
 !data/raw/**
 !data/raw/*.zip
+!.gitkeep
