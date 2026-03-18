@@ -1,6 +1,6 @@
 # NHTSA ODI Complaint Analytics
 
-Professional-grade data science workspace for analyzing NHTSA ODI consumer complaint data, with a focus on reproducible team workflows, explainable analyses, and future ML/NLP modeling for vehicle safety signal detection.
+Professional-grade data science workspace for analyzing National Highway Traffic Safety Administration (NHTSA) Office of Defects Investigation (ODI) consumer complaint data, with a focus on reproducible team workflows, explainable analyses, and future ML/NLP modeling for vehicle safety signal detection.
 
 This repository is designed for a DSBA 6156 (Machine Learning) group project. The current setup emphasizes:
 
