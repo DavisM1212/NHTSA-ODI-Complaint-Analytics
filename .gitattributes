@@ -11,6 +11,7 @@
 
 # Exploration notebooks listed here are auto-cleared on commit
 notebooks/EDA.ipynb filter=notebookstrip
+notebooks/Cleaning.ipynb filter=notebookstrip
 
 *.zip binary
 *.parquet binary
