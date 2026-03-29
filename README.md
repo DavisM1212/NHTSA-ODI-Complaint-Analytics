@@ -1,30 +1,49 @@
 # NHTSA ODI Complaint Analytics
 
-Professional-grade data science workspace for analyzing National Highway Traffic Safety Administration (NHTSA) Office of Defects Investigation (ODI) consumer complaint data, with a focus on reproducible team workflows, explainable analyses, and future ML/NLP modeling for vehicle safety signal detection.
+Professional-grade data science workspace for analyzing National Highway Traffic Safety Administration (NHTSA) Office of Defects Investigation (ODI) consumer complaint data, with a focus on reproducible workflows, explainable analyses, and leakage-aware modeling for vehicle safety signal detection.
 
 This repository is designed for a DSBA 6156 (Machine Learning) group project. The current setup emphasizes:
 
 - low-friction onboarding for teammates
 - consistent project structure
-- easy local extraction and preprocessing of ODI complaint data
+- easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
 
-The planned analysis scope includes complaint severity prioritization, component-level defect pattern analysis, emerging signal detection, and later time-aware modeling and NLP.
+The current workflow already covers complaint ingestion, EDA, audited cleaning, component target construction, and a time-aware structured benchmark for component prediction. The next major steps are complaint severity ranking and NLP-driven early warning.
 
 ## Project Overview
 
-This project works with NHTSA ODI complaint datasets (complaints first, optional recall joins later). The immediate goal is to standardize repo setup and create a reliable local pipeline that:
+This project works with NHTSA ODI complaint datasets (complaints first, optional recall joins later). The current pipeline is designed to:
 
-1. reads complaint zip files from `data/raw/`
-2. extracts tabular source files into `data/extracted/`
-3. performs lightweight preprocessing for pandas use
-4. writes processed parquet (preferred) or CSV outputs to `data/processed/`
-5. writes ingest manifests/summaries to `data/outputs/`
+1. read complaint zip files from `data/raw/`
+2. extract tabular source files into `data/extracted/`
+3. build processed complaint tables in `data/processed/`
+4. apply conservative, schema-aware cleaning and issue flagging
+5. build task-specific modeling tables for severity and component work
+6. benchmark structured models with time-aware validation
 
 Important data workflow rule:
 
 - raw zip files are treated as immutable source artifacts
 - extracted and processed outputs are local workflow artifacts (not intended for Git commit by default)
+
+## Current Status
+
+The repo is now beyond the initial scaffold stage. Current completed work includes:
+
+- `notebooks/EDA.ipynb`: structural audit of the complaint data
+- `notebooks/Cleaning.ipynb`: reviewed cleaning decisions tied to `docs/CMPL.txt`
+- `src/preprocessing/clean_complaints.py`: reproducible shared cleaning pipeline
+- `src/features/collapse_components.py`: case-level component modeling table builder
+- `notebooks/Component_Modeling.ipynb`: baseline modeling workflow and structured model review
+- `src/modeling/component_catboost.py`: reproducible CatBoost benchmark script
+- `src/modeling/tune_component_catboost.py`: focused Optuna tuning for the component model
+
+Current structured component benchmark on the `2025` validation split:
+
+- top-1 accuracy: `0.3601`
+- macro F1: `0.2420`
+- top-3 accuracy: `0.5873`
 
 ## Repository Structure
 
@@ -64,7 +83,9 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- install_git_filters.py
 |   `-- git_notebook_filter.py
 |-- notebooks/
-|   `-- EDA.ipynb
+|   |-- EDA.ipynb
+|   |-- Cleaning.ipynb
+|   `-- Component_Modeling.ipynb
 `-- src/
     |-- __init__.py
     |-- config/
@@ -77,8 +98,12 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |   |-- schema_checks.py
     |   `-- io_utils.py
     |-- preprocessing/
+    |   `-- clean_complaints.py
     |-- features/
+    |   `-- collapse_components.py
     |-- modeling/
+    |   |-- component_catboost.py
+    |   `-- tune_component_catboost.py
     |-- evaluation/
     |-- nlp/
     |-- signals/
@@ -191,12 +216,24 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Local pandas-friendly outputs (parquet preferred, CSV fallback)
 - These are the files your EDA/modeling work will usually read
+- Current key outputs include:
+  - `odi_complaints_combined.parquet`
+  - `odi_complaints_cleaned.parquet`
+  - `odi_severity_cases.parquet`
+  - `odi_component_rows.parquet`
+  - `odi_component_model_cases.parquet`
 - Ignored by Git
 
 `data/outputs/`
 
-- Run manifests, summaries, and diagnostics
+- Run manifests, summaries, diagnostics, and model benchmark artifacts
 - Useful for verifying what a pipeline run produced
+- Current examples include:
+  - `clean_complaints_summary.csv`
+  - `collapse_components_summary.csv`
+  - `component_catboost_metrics.csv`
+  - `component_catboost_feature_importance.csv`
+  - `component_catboost_params.json`
 - Ignored by Git
 
 ### `scripts/` (quick setup commands)
@@ -246,10 +283,15 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 `notebooks/EDA.ipynb`
 
-- Starter Jupyter notebook for manual EDA in the VS Code editor (good for people who prefer Colab-style workflows)
-- Loads processed files from `data/processed/` into pandas DataFrames
-- Creates a default DataFrame named `df` (prefers the combined complaints dataset)
-- Safe place to explore columns, filters, groupbys, and charts without using the command line
+- Main exploratory notebook for structural audit, missingness review, anomaly checks, and visual EDA
+
+`notebooks/Cleaning.ipynb`
+
+- Decision notebook for cleaning logic, issue flags, date handling, component grouping, and vehicle-first modeling choices
+
+`notebooks/Component_Modeling.ipynb`
+
+- Modeling notebook for time-aware baselines, CatBoost benchmarking, and component-model diagnostics
 
 ### `src/` ("source" folder, contains main Python files grouped by objective)
 
@@ -278,14 +320,18 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `src/preprocessing/`
 
 - Cleaning and transformation logic
+- `clean_complaints.py`: conservative master cleaning plus task-specific cleaned outputs
 
 `src/features/`
 
 - Feature engineering code for ML/NLP/time-based models
+- `collapse_components.py`: builds the case-level single-label component modeling table
 
 `src/modeling/`
 
 - Model training logic (baselines first, then stronger models)
+- `component_catboost.py`: structured benchmark for component prediction
+- `tune_component_catboost.py`: focused Optuna tuning around the CatBoost benchmark
 
 `src/evaluation/`
 
@@ -502,6 +548,8 @@ Important local-processing design choices:
 2. Confirm verification passes (`verify_install.py` runs automatically)
 3. Run the pipeline script (`run_pipeline_*`)
 4. Inspect outputs in `data/processed/` and manifests in `data/outputs/`
+5. Run cleaning / feature table builders as needed
+6. Run modeling scripts as needed
 
 ### Run the pipeline (Windows)
 
@@ -531,7 +579,7 @@ Optional flags (changes output from parquet to csv, overwrites existing extracte
 ./scripts/run_pipeline_mac_linux.sh --no-combine
 ```
 
-### What the current starter pipeline does
+### What the current ingestion pipeline does
 
 `src/data/ingest_odi.py` currently:
 
@@ -543,6 +591,46 @@ Optional flags (changes output from parquet to csv, overwrites existing extracte
 - writes processed parquet (preferred) or CSV outputs to `data/processed/`
 - optionally builds a combined complaint dataset
 - writes run manifests and simple summaries to `data/outputs/`
+
+### Run the current cleaning and modeling flow manually
+
+After raw ingestion, the current analysis flow is:
+
+1. shared cleaning
+2. component case collapse
+3. structured component benchmark
+
+#### Shared cleaning
+
+```powershell
+.\.venv\Scripts\python.exe -m src.preprocessing.clean_complaints --output-format parquet
+```
+
+#### Component case collapse
+
+```powershell
+.\.venv\Scripts\python.exe -m src.features.collapse_components --output-format parquet
+```
+
+#### Structured component benchmark
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.component_catboost --task-type CPU
+```
+
+For GPU runtimes such as Colab:
+
+```bash
+python -m src.modeling.component_catboost --task-type GPU --devices 0
+```
+
+#### Focused CatBoost tuning
+
+```bash
+python -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --n-trials 40 --seed-list 42,43
+```
+
+These commands produce the current benchmark artifacts in `data/processed/` and `data/outputs/`.
 
 ## Git Basics Overview
 
@@ -710,7 +798,7 @@ VS Code push flow:
 
 ### End-of-work checklist for teammates
 
-Before you say "I’m done", do this:
+Before you say "I'm done", do this:
 
 1. `git status` is clean (or only shows files you intentionally left uncommitted)
 2. You pulled/merged latest `main` into your branch
