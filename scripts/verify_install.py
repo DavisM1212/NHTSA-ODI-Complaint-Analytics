@@ -20,7 +20,7 @@ REQUIRED_DIRS = [
     "scripts"
 ]
 
-REQUIRED_IMPORTS = ["pandas", "numpy", "sklearn", "matplotlib", "pyarrow"]
+REQUIRED_IMPORTS = ["pandas", "numpy", "sklearn", "matplotlib", "pyarrow", "catboost", "optuna"]
 
 OPTIONAL_IMPORTS = ["seaborn"]
 

@@ -1,6 +1,11 @@
 [tool.ruff]
 line-length = 88
 
+[tools.ruff.format]
+indent-style = "tab"
+quote-style = "preserve"
+skip-magic-trailing-comma = true
+
 [tool.ruff.lint]
 extend-select = [
     "F",        # Pyflakes rules
