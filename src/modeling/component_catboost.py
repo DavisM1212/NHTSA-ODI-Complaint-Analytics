@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -6,378 +7,373 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from catboost import CatBoostClassifier
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    precision_recall_fscore_support,
-    top_k_accuracy_score,
-)
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
+from threadpoolctl import threadpool_limits
 
 from src.config import settings
-from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
+from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import write_dataframe
+from src.modeling.component_common import (
+    DATE_COL,
+    FEATURE_SET_DEFS,
+    ID_COL,
+    MAX_TOP_K,
+    SINGLE_INPUT_STEM,
+    TARGET_COL,
+    TRAIN_END,
+    VALID_END,
+    build_catboost_model,
+    build_multiclass_calibration_df,
+    build_multiclass_class_df,
+    build_multiclass_confusion_df,
+    build_multiclass_metric_row,
+    feature_manifest,
+    get_git_dirty_flag,
+    get_git_head,
+    json_ready,
+    load_frame,
+    prep_catboost_frames,
+    prep_single_label_cases,
+    runtime_manifest,
+    score_multiclass_from_proba,
+    sha256_path,
+    split_single_label_cases,
+    write_json,
+)
 
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
-INPUT_STEM = 'odi_component_model_cases'
-MODEL_STEM = 'component_catboost_bench'
-SPLIT_NAME = 'component_catboost_split_summary.csv'
-METRIC_NAME = 'component_catboost_metrics.csv'
-CLASS_NAME = 'component_catboost_class_metrics.csv'
-IMPORTANCE_NAME = 'component_catboost_feature_importance.csv'
-PARAMS_NAME = 'component_catboost_params.json'
-VALID_PRED_STEM = 'component_catboost_valid_preds'
-MODEL_NAME = 'component_catboost_model.cbm'
+SELECTION_MANIFEST_NAME = 'component_single_label_selection_manifest.json'
+SPLIT_NAME = 'component_single_label_split_summary.csv'
+METRIC_NAME = 'component_single_label_benchmark_metrics.csv'
+CLASS_NAME = 'component_single_label_holdout_class_metrics.csv'
+IMPORTANCE_NAME = 'component_single_label_feature_importance.csv'
+CALIB_NAME = 'component_single_label_holdout_calibration.csv'
+CONFUSION_NAME = 'component_single_label_holdout_confusion_major.csv'
+MANIFEST_NAME = 'component_single_label_benchmark_manifest.json'
+HOLDOUT_PRED_STEM = 'component_single_label_holdout_preds'
+MODEL_NAME = 'component_single_label_model.cbm'
 
 
 # -----------------------------------------------------------------------------
-# Benchmark setup
+# Shared prep for sklearn baselines
 # -----------------------------------------------------------------------------
-ID_COL = 'odino'
-TARGET_COL = 'component_group'
-DATE_COL = 'ldate'
-TRAIN_END = pd.Timestamp('2024-12-31')
-VALID_END = pd.Timestamp('2025-12-31')
-
-CAT_COLS = [
-    'mfr_name',
-    'maketxt',
-    'modeltxt',
-    'state',
-    'cmpl_type',
-    'drive_train',
-    'fuel_sys',
-    'fuel_type',
-    'trans_type',
-    'fire',
-    'crash',
-    'medical_attn',
-    'vehicles_towed_yn',
-    'police_rpt_yn',
-    'orig_owner_yn',
-    'anti_brakes_yn',
-    'cruise_cont_yn'
-]
-
-NUM_COLS = [
-    'yeartxt',
-    'miles',
-    'veh_speed',
-    'injured',
-    'deaths',
-    'num_cyls',
-    'lag_days_safe'
-]
-
-FLAG_COLS = [
-    'miles_missing_flag',
-    'veh_speed_missing_flag',
-    'faildate_untrusted_flag',
-    'flag_year_unknown',
-    'flag_speed_high',
-    'flag_miles_high'
-]
-
-FEATURE_COLS = CAT_COLS + NUM_COLS + FLAG_COLS
-
-BENCH_PARAMS = {
-    'bootstrap_type': 'Bernoulli',
-    'iterations': 1800,
-    'learning_rate': 0.07405467149893648,
-    'depth': 9,
-    'l2_leaf_reg': 7.572705439311379,
-    'random_strength': 0.29374126086853103,
-    'border_count': 128,
-    'subsample': 0.6895168484791427
-}
-
-
-# -----------------------------------------------------------------------------
-# Inputs
-# -----------------------------------------------------------------------------
-def resolve_input_path(input_path=None):
-    if input_path is not None:
-        path = Path(input_path)
+def resolve_selection_manifest(selection_manifest_path=None):
+    if selection_manifest_path is not None:
+        path = Path(selection_manifest_path)
         if not path.exists():
-            raise FileNotFoundError(f'Input file not found: {path}')
+            raise FileNotFoundError(f'Selection manifest not found: {path}')
         return path
 
-    parquet_path = PROCESSED_DATA_DIR / f'{INPUT_STEM}.parquet'
-    if parquet_path.exists():
-        return parquet_path
-
-    csv_path = PROCESSED_DATA_DIR / f'{INPUT_STEM}.csv'
-    if csv_path.exists():
-        return csv_path
-
-    raise FileNotFoundError(
-        'No component case file found under data/processed. Run the component collapse first'
-    )
+    default_path = OUTPUTS_DIR / SELECTION_MANIFEST_NAME
+    if not default_path.exists():
+        raise FileNotFoundError(
+            f'No selection manifest found at {default_path}. Run tune_component_catboost first'
+        )
+    return default_path
 
 
-def load_cases(input_path=None):
-    path = resolve_input_path(input_path)
-    if path.suffix.lower() == '.parquet':
-        return pd.read_parquet(path)
-    return pd.read_csv(path, dtype=str, low_memory=False)
+def load_selection_manifest(selection_manifest_path=None):
+    path = resolve_selection_manifest(selection_manifest_path)
+    with path.open('r', encoding='utf-8') as handle:
+        return json.load(handle), path
 
 
-def require_cols(df):
-    required = FEATURE_COLS + [ID_COL, TARGET_COL, DATE_COL]
-    missing = [column for column in required if column not in df.columns]
-    if missing:
-        missing_text = ', '.join(missing)
-        raise ValueError(f'Missing required modeling columns: {missing_text}')
+def build_logistic_pipeline(feature_info, random_seed):
+    cat_cols = list(feature_info['cat_cols'])
+    num_cols = list(feature_info['num_cols'] + feature_info['flag_cols'])
 
-
-# -----------------------------------------------------------------------------
-# Prep and split
-# -----------------------------------------------------------------------------
-def prep_cases(df):
-    require_cols(df)
-    work = df.copy()
-    work[DATE_COL] = pd.to_datetime(work[DATE_COL], errors='coerce')
-    if work[DATE_COL].isna().any():
-        missing_dates = int(work[DATE_COL].isna().sum())
-        raise ValueError(f'Found {missing_dates} rows with invalid {DATE_COL} values')
-
-    for column in CAT_COLS:
-        work[column] = work[column].astype('string').fillna('__MISSING__').astype(str)
-
-    for column in NUM_COLS + FLAG_COLS:
-        work[column] = pd.to_numeric(work[column], errors='coerce')
-
-    return work.sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
-
-
-def split_cases(df):
-    train_df = df.loc[df[DATE_COL] <= TRAIN_END].copy()
-    valid_df = df.loc[(df[DATE_COL] > TRAIN_END) & (df[DATE_COL] <= VALID_END)].copy()
-    holdout_df = df.loc[df[DATE_COL] > VALID_END].copy()
-
-    if train_df.empty:
-        raise ValueError('Training split is empty')
-    if valid_df.empty:
-        raise ValueError('Validation split is empty')
-
-    unseen_valid = sorted(set(valid_df[TARGET_COL]) - set(train_df[TARGET_COL]))
-    if unseen_valid:
-        unseen_text = ', '.join(unseen_valid)
-        raise ValueError(f'Validation split has unseen target labels: {unseen_text}')
-
-    split_df = pd.DataFrame(
+    cat_pipe = Pipeline(
         [
-            {
-                'split': 'train',
-                'rows': int(len(train_df)),
-                'cases': int(train_df[ID_COL].nunique()),
-                'date_min': train_df[DATE_COL].min(),
-                'date_max': train_df[DATE_COL].max(),
-                'target_groups': int(train_df[TARGET_COL].nunique())
-            },
-            {
-                'split': 'valid_2025',
-                'rows': int(len(valid_df)),
-                'cases': int(valid_df[ID_COL].nunique()),
-                'date_min': valid_df[DATE_COL].min(),
-                'date_max': valid_df[DATE_COL].max(),
-                'target_groups': int(valid_df[TARGET_COL].nunique())
-            },
-            {
-                'split': 'holdout_2026',
-                'rows': int(len(holdout_df)),
-                'cases': int(holdout_df[ID_COL].nunique()),
-                'date_min': holdout_df[DATE_COL].min(),
-                'date_max': holdout_df[DATE_COL].max(),
-                'target_groups': int(holdout_df[TARGET_COL].nunique())
-            }
+            ('imputer', SimpleImputer(strategy='most_frequent')),
+            ('encoder', OneHotEncoder(handle_unknown='ignore'))
         ]
     )
-    return train_df, valid_df, holdout_df, split_df
-
-
-# -----------------------------------------------------------------------------
-# Benchmark model
-# -----------------------------------------------------------------------------
-def build_model(task_type='CPU', devices='0', random_seed=None, verbose=100, params_override=None):
-    task_type = str(task_type).upper().strip()
-    if task_type not in {'CPU', 'GPU'}:
-        raise ValueError("task_type must be either 'CPU' or 'GPU'")
-
-    params = {
-        'loss_function': 'MultiClass',
-        'eval_metric': 'TotalF1:average=Macro',
-        'custom_metric': ['Accuracy', 'MultiClass'],
-        'auto_class_weights': 'Balanced',
-        'has_time': True,
-        'grow_policy': 'SymmetricTree',
-        'random_seed': settings.RANDOM_SEED if random_seed is None else int(random_seed),
-        'allow_writing_files': False,
-        'task_type': task_type,
-        'verbose': int(verbose)
+    num_pipe = Pipeline(
+        [
+            ('imputer', SimpleImputer(strategy='median')),
+            ('scaler', StandardScaler(with_mean=False))
+        ]
+    )
+    prep = ColumnTransformer(
+        [
+            ('cat', cat_pipe, cat_cols),
+            ('num', num_pipe, num_cols)
+        ]
+    )
+    logit_kwargs = {
+        'solver': 'saga',
+        'class_weight': 'balanced',
+        'max_iter': 4000,
+        'tol': 1e-3,
+        'random_state': random_seed
     }
-    params.update(BENCH_PARAMS)
 
-    if params_override:
-        params.update(params_override)
+    # sklearn 1.8 removed multi_class, but older versions still need it here
+    if 'multi_class' in inspect.signature(LogisticRegression).parameters:
+        logit_kwargs['multi_class'] = 'multinomial'
 
-    if task_type == 'GPU':
-        params['devices'] = str(devices)
+    return Pipeline(
+        [
+            ('prep', prep),
+            (
+                'model',
+                LogisticRegression(**logit_kwargs)
+            )
+        ]
+    )
 
-    return CatBoostClassifier(**params)
+
+def build_histgb_model(random_seed):
+    return HistGradientBoostingClassifier(
+        loss='log_loss',
+        learning_rate=0.05,
+        max_iter=300,
+        max_depth=10,
+        min_samples_leaf=30,
+        class_weight='balanced',
+        random_state=random_seed
+    )
 
 
-def score_split(model_name, split_name, y_true, pred, proba, classes, fit_seconds=pd.NA, best_iteration=pd.NA):
+def build_histgb_pipeline(feature_info, random_seed):
+    cat_cols = list(feature_info['cat_cols'])
+    num_cols = list(feature_info['num_cols'] + feature_info['flag_cols'])
+
+    cat_pipe = Pipeline(
+        [
+            ('imputer', SimpleImputer(strategy='most_frequent')),
+            (
+                'encoder',
+                OrdinalEncoder(
+                    handle_unknown='use_encoded_value',
+                    unknown_value=-1,
+                    encoded_missing_value=-1
+                )
+            )
+        ]
+    )
+    num_pipe = Pipeline(
+        [
+            ('imputer', SimpleImputer(strategy='median'))
+        ]
+    )
+    prep = ColumnTransformer(
+        [
+            ('cat', cat_pipe, cat_cols),
+            ('num', num_pipe, num_cols)
+        ],
+        sparse_threshold=0
+    )
+
+    return Pipeline(
+        [
+            ('prep', prep),
+            ('model', build_histgb_model(random_seed=random_seed))
+        ]
+    )
+
+
+# -----------------------------------------------------------------------------
+# Baseline and benchmark runners
+# -----------------------------------------------------------------------------
+def build_naive_rows(train_target, eval_target, stage_name, split_name):
+    train_counts = train_target.value_counts()
+    majority_label = str(train_counts.idxmax())
+    top_labels = train_counts.head(MAX_TOP_K).index.tolist()
+    pred = pd.Series(majority_label, index=eval_target.index)
+    metrics = {
+        'top_1_accuracy': round(float((eval_target == majority_label).mean()), 4),
+        'macro_f1': round(float(f1_score(eval_target, pred, average='macro')), 4),
+        'top_3_accuracy': round(float(eval_target.isin(top_labels).mean()), 4)
+    }
     return {
-        'model': model_name,
+        'model': 'Most Frequent Label',
+        'stage': stage_name,
         'split': split_name,
-        'rows': int(len(y_true)),
-        'fit_seconds': fit_seconds,
-        'best_iteration': best_iteration,
-        'top_1_accuracy': round(accuracy_score(y_true, pred), 4),
-        'macro_f1': round(f1_score(y_true, pred, average='macro'), 4),
-        'top_3_accuracy': round(top_k_accuracy_score(y_true, proba, labels=classes, k=3), 4)
+        'rows': int(len(eval_target)),
+        'fit_seconds': np.nan,
+        'selected_iteration': np.nan,
+        **metrics
     }
 
 
-def fit_component_model(train_df, valid_df, task_type='CPU', devices='0', random_seed=None, verbose=100, params_override=None):
-    X_train = train_df[FEATURE_COLS].copy()
+def fit_logistic_stage(train_df, eval_df, feature_info, stage_name, split_name, random_seed):
+    X_train = train_df[feature_info['feature_cols']].copy()
     y_train = train_df[TARGET_COL].copy()
-    X_valid = valid_df[FEATURE_COLS].copy()
-    y_valid = valid_df[TARGET_COL].copy()
+    X_eval = eval_df[feature_info['feature_cols']].copy()
+    y_eval = eval_df[TARGET_COL].copy()
 
-    unseen_valid = sorted(set(y_valid) - set(y_train))
-    if unseen_valid:
-        unseen_text = ', '.join(unseen_valid)
-        raise ValueError(f'Validation frame has unseen target labels: {unseen_text}')
+    model = build_logistic_pipeline(feature_info, random_seed=random_seed)
+    start = perf_counter()
+    model.fit(X_train, y_train)
+    fit_seconds = round(perf_counter() - start, 2)
 
-    train_counts = y_train.value_counts()
-    majority_label = train_counts.idxmax()
-    top3_labels = train_counts.head(3).index.tolist()
-    naive_pred = pd.Series(majority_label, index=y_valid.index)
+    train_proba = model.predict_proba(X_train)
+    eval_proba = model.predict_proba(X_eval)
+    classes = model.named_steps['model'].classes_
 
-    model = build_model(
+    return [
+        build_multiclass_metric_row(
+            'Logistic Regression',
+            stage_name,
+            'train' if split_name == 'valid_2025' else split_name,
+            y_train if split_name == 'valid_2025' else y_eval,
+            train_proba if split_name == 'valid_2025' else eval_proba,
+            classes,
+            fit_seconds=fit_seconds
+        ),
+        build_multiclass_metric_row(
+            'Logistic Regression',
+            stage_name,
+            split_name,
+            y_eval,
+            eval_proba,
+            classes,
+            fit_seconds=fit_seconds
+        )
+    ] if split_name == 'valid_2025' else [
+        build_multiclass_metric_row(
+            'Logistic Regression',
+            stage_name,
+            split_name,
+            y_eval,
+            eval_proba,
+            classes,
+            fit_seconds=fit_seconds
+        )
+    ]
+
+
+def fit_histgb_stage(train_df, eval_df, feature_info, stage_name, split_name, random_seed):
+    X_train = train_df[feature_info['feature_cols']].copy()
+    y_train = train_df[TARGET_COL].copy()
+    X_eval = eval_df[feature_info['feature_cols']].copy()
+    y_eval = eval_df[TARGET_COL].copy()
+
+    model = build_histgb_pipeline(feature_info, random_seed=random_seed)
+    start = perf_counter()
+    # Keep this secondary baseline single-threaded so sklearn behaves on Windows and in sandboxed runs
+    # with threadpool_limits(limits=1):
+    #     model.fit(X_train, y_train)
+    model.fit(X_train, y_train)
+    fit_seconds = round(perf_counter() - start, 2)
+
+    train_proba = model.predict_proba(X_train)
+    eval_proba = model.predict_proba(X_eval)
+    classes = model.named_steps['model'].classes_
+
+    return [
+        build_multiclass_metric_row(
+            'HistGradientBoosting',
+            stage_name,
+            'train' if split_name == 'valid_2025' else split_name,
+            y_train if split_name == 'valid_2025' else y_eval,
+            train_proba if split_name == 'valid_2025' else eval_proba,
+            classes,
+            fit_seconds=fit_seconds
+        ),
+        build_multiclass_metric_row(
+            'HistGradientBoosting',
+            stage_name,
+            split_name,
+            y_eval,
+            eval_proba,
+            classes,
+            fit_seconds=fit_seconds
+        )
+    ] if split_name == 'valid_2025' else [
+        build_multiclass_metric_row(
+            'HistGradientBoosting',
+            stage_name,
+            split_name,
+            y_eval,
+            eval_proba,
+            classes,
+            fit_seconds=fit_seconds
+        )
+    ]
+
+
+def fit_fixed_catboost_stage(train_df, eval_df, feature_info, params, selected_iteration, task_type, devices, random_seed, verbose, stage_name, split_name):
+    X_train, X_eval = prep_catboost_frames(train_df, eval_df, feature_info)
+    y_train = train_df[TARGET_COL].copy()
+    y_eval = eval_df[TARGET_COL].copy()
+
+    fixed_params = dict(params)
+    fixed_params['iterations'] = int(selected_iteration)
+    model = build_catboost_model(
+        fixed_params,
         task_type=task_type,
         devices=devices,
         random_seed=random_seed,
-        verbose=verbose,
-        params_override=params_override
+        verbose=verbose
     )
 
     start = perf_counter()
     model.fit(
         X_train,
         y_train,
-        cat_features=CAT_COLS,
-        eval_set=(X_valid, y_valid),
-        use_best_model=True,
-        early_stopping_rounds=100
+        cat_features=feature_info['cat_cols'],
+        use_best_model=False
     )
     fit_seconds = round(perf_counter() - start, 2)
-    best_iteration = int(model.get_best_iteration())
 
-    train_pred = pd.Series(model.predict(X_train).ravel(), index=y_train.index)
     train_proba = model.predict_proba(X_train)
-    valid_pred = pd.Series(model.predict(X_valid).ravel(), index=y_valid.index)
-    valid_proba = model.predict_proba(X_valid)
+    eval_proba = model.predict_proba(X_eval)
     classes = model.classes_
 
     metric_rows = [
-        {
-            'model': 'Most Frequent Label',
-            'split': 'valid_2025',
-            'rows': int(len(y_valid)),
-            'fit_seconds': np.nan,
-            'best_iteration': np.nan,
-            'top_1_accuracy': round(accuracy_score(y_valid, naive_pred), 4),
-            'macro_f1': round(f1_score(y_valid, naive_pred, average='macro'), 4),
-            'top_3_accuracy': round(y_valid.isin(top3_labels).mean(), 4)
-        },
-        score_split(
+        build_multiclass_metric_row(
             'CatBoost',
-            'train',
-            y_train,
-            train_pred,
-            train_proba,
+            stage_name,
+            'train' if split_name == 'valid_2025' else split_name,
+            y_train if split_name == 'valid_2025' else y_eval,
+            train_proba if split_name == 'valid_2025' else eval_proba,
             classes,
             fit_seconds=fit_seconds,
-            best_iteration=best_iteration
+            selected_iteration=selected_iteration
         ),
-        score_split(
+        build_multiclass_metric_row(
             'CatBoost',
-            'valid_2025',
-            y_valid,
-            valid_pred,
-            valid_proba,
+            stage_name,
+            split_name,
+            y_eval,
+            eval_proba,
             classes,
             fit_seconds=fit_seconds,
-            best_iteration=best_iteration
+            selected_iteration=selected_iteration
+        )
+    ] if split_name == 'valid_2025' else [
+        build_multiclass_metric_row(
+            'CatBoost',
+            stage_name,
+            split_name,
+            y_eval,
+            eval_proba,
+            classes,
+            fit_seconds=fit_seconds,
+            selected_iteration=selected_iteration
         )
     ]
-    metric_df = pd.DataFrame(metric_rows)
 
-    precision, recall, f1, support = precision_recall_fscore_support(
-        y_valid,
-        valid_pred,
-        labels=classes,
-        zero_division=0
-    )
-    class_df = pd.DataFrame(
-        {
-            'component_group': classes,
-            'support': support,
-            'precision': np.round(precision, 4),
-            'recall': np.round(recall, 4),
-            'f1': np.round(f1, 4)
-        }
-    ).sort_values(['support', 'f1'], ascending=[False, False]).reset_index(drop=True)
-
-    importance_df = pd.DataFrame(
-        {
-            'feature': FEATURE_COLS,
-            'importance': np.round(model.get_feature_importance(), 4)
-        }
-    ).sort_values('importance', ascending=False).reset_index(drop=True)
-
-    top_idx = np.argsort(valid_proba, axis=1)[:, -3:][:, ::-1]
-    top_labels = np.asarray(classes)[top_idx]
-    top_scores = np.take_along_axis(valid_proba, top_idx, axis=1)
-
-    pred_df = valid_df[[ID_COL, DATE_COL, TARGET_COL]].copy().reset_index(drop=True)
-    pred_df = pred_df.rename(columns={TARGET_COL: 'component_true'})
-    pred_df['component_pred'] = valid_pred.reset_index(drop=True)
-    pred_df['component_correct_top1'] = pred_df['component_true'].eq(pred_df['component_pred'])
-    pred_df['component_correct_top3'] = [
-        truth in labels
-        for truth, labels in zip(pred_df['component_true'], top_labels)
-    ]
-
-    for rank in [1, 2, 3]:
-        pred_df[f'pred_top{rank}'] = top_labels[:, rank - 1]
-        pred_df[f'pred_top{rank}_proba'] = np.round(top_scores[:, rank - 1], 6)
-
-    run_info = {
-        'benchmark_label': 'optuna_focus_trial_35_default',
-        'input_stem': INPUT_STEM,
-        'task_type': str(task_type).upper().strip(),
-        'devices': str(devices) if str(task_type).upper().strip() == 'GPU' else None,
-        'random_seed': settings.RANDOM_SEED if random_seed is None else int(random_seed),
-        'train_end': str(TRAIN_END.date()),
-        'valid_end': str(VALID_END.date()),
-        'fit_seconds': fit_seconds,
-        'best_iteration': best_iteration,
-        'best_score': model.get_best_score(),
-        'feature_cols': FEATURE_COLS,
-        'cat_cols': CAT_COLS,
-        'num_cols': NUM_COLS,
-        'flag_cols': FLAG_COLS,
-        'benchmark_params': BENCH_PARAMS,
-        'model_params': model.get_all_params()
+    return {
+        'model': model,
+        'metric_rows': metric_rows,
+        'classes': classes,
+        'train_proba': train_proba,
+        'eval_proba': eval_proba,
+        'train_target': y_train,
+        'eval_target': y_eval,
+        'eval_frame': eval_df
     }
-
-    return model, metric_df, class_df, importance_df, pred_df, run_info
 
 
 # -----------------------------------------------------------------------------
@@ -385,18 +381,23 @@ def fit_component_model(train_df, valid_df, task_type='CPU', devices='0', random
 # -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Train the benchmark CatBoost component model on the single-label component case table'
+        description='Run the single-label structured component benchmark with baselines and an untouched 2026 holdout'
     )
     parser.add_argument(
         '--input-path',
         default=None,
-        help='Optional path to the component case parquet or csv file'
+        help='Optional path to the single-label component case parquet or csv file'
+    )
+    parser.add_argument(
+        '--selection-manifest',
+        default=None,
+        help='Optional path to the component selection manifest json file'
     )
     parser.add_argument(
         '--task-type',
         choices=['CPU', 'GPU', 'cpu', 'gpu'],
         default='CPU',
-        help='CatBoost processing target. Use GPU in Colab or another GPU runtime for benchmark-speed training'
+        help='CatBoost processing target. CPU is the canonical local default'
     )
     parser.add_argument(
         '--devices',
@@ -407,19 +408,24 @@ def parse_args():
         '--random-seed',
         type=int,
         default=settings.RANDOM_SEED,
-        help='Random seed for the CatBoost benchmark run'
+        help='Random seed used for benchmark baselines and the fixed CatBoost refit'
     )
     parser.add_argument(
         '--verbose',
         type=int,
-        default=100,
+        default=0,
         help='CatBoost logging interval'
     )
     parser.add_argument(
         '--output-format',
         choices=['parquet', 'csv'],
         default=settings.OUTPUT_FORMAT if settings.OUTPUT_FORMAT in {'parquet', 'csv'} else 'parquet',
-        help='Preferred output format for validation predictions'
+        help='Preferred output format for holdout predictions'
+    )
+    parser.add_argument(
+        '--skip-readme-update',
+        action='store_true',
+        help='Skip updating the README benchmark section from the final artifact'
     )
     return parser.parse_args()
 
@@ -428,54 +434,230 @@ def main():
     args = parse_args()
     ensure_project_directories()
 
-    raw_df = load_cases(args.input_path)
-    case_df = prep_cases(raw_df)
-    train_df, valid_df, holdout_df, split_df = split_cases(case_df)
-    model, metric_df, class_df, importance_df, pred_df, run_info = fit_component_model(
+    selection_manifest, selection_manifest_path = load_selection_manifest(args.selection_manifest)
+    feature_info = selection_manifest['feature_manifest']
+    feature_info = feature_manifest(feature_info['feature_set_name'])
+    selected_iteration = int(selection_manifest['selected_iteration'])
+    best_params = selection_manifest['best_params']
+
+    raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.input_path)
+    case_df = prep_single_label_cases(raw_df, feature_info['feature_cols'])
+    train_df, valid_df, holdout_df, split_df = split_single_label_cases(case_df)
+    dev_df = pd.concat([train_df, valid_df], ignore_index=True).sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
+
+    metric_rows = []
+    metric_rows.extend(
+        [
+            build_naive_rows(train_df[TARGET_COL], train_df[TARGET_COL], 'selection_train_valid', 'train'),
+            build_naive_rows(train_df[TARGET_COL], valid_df[TARGET_COL], 'selection_train_valid', 'valid_2025')
+        ]
+    )
+    metric_rows.extend(
+        fit_logistic_stage(
+            train_df,
+            valid_df,
+            feature_info,
+            stage_name='selection_train_valid',
+            split_name='valid_2025',
+            random_seed=args.random_seed
+        )
+    )
+    metric_rows.extend(
+        fit_histgb_stage(
+            train_df,
+            valid_df,
+            feature_info,
+            stage_name='selection_train_valid',
+            split_name='valid_2025',
+            random_seed=args.random_seed
+        )
+    )
+    selection_catboost = fit_fixed_catboost_stage(
         train_df,
         valid_df,
-        task_type=args.task_type,
+        feature_info,
+        best_params,
+        selected_iteration,
+        task_type=str(args.task_type).upper(),
         devices=args.devices,
         random_seed=args.random_seed,
-        verbose=args.verbose
+        verbose=args.verbose,
+        stage_name='selection_train_valid',
+        split_name='valid_2025'
     )
+    metric_rows.extend(selection_catboost['metric_rows'])
+
+    metric_rows.append(
+        build_naive_rows(dev_df[TARGET_COL], holdout_df[TARGET_COL], 'final_holdout', 'holdout_2026')
+    )
+    metric_rows.extend(
+        fit_logistic_stage(
+            dev_df,
+            holdout_df,
+            feature_info,
+            stage_name='final_holdout',
+            split_name='holdout_2026',
+            random_seed=args.random_seed
+        )
+    )
+    metric_rows.extend(
+        fit_histgb_stage(
+            dev_df,
+            holdout_df,
+            feature_info,
+            stage_name='final_holdout',
+            split_name='holdout_2026',
+            random_seed=args.random_seed
+        )
+    )
+    holdout_catboost = fit_fixed_catboost_stage(
+        dev_df,
+        holdout_df,
+        feature_info,
+        best_params,
+        selected_iteration,
+        task_type=str(args.task_type).upper(),
+        devices=args.devices,
+        random_seed=args.random_seed,
+        verbose=args.verbose,
+        stage_name='final_holdout',
+        split_name='holdout_2026'
+    )
+    metric_rows.extend(holdout_catboost['metric_rows'])
+    metric_df = pd.DataFrame(metric_rows)
+
+    holdout_pred, holdout_metrics = score_multiclass_from_proba(
+        holdout_catboost['eval_target'],
+        holdout_catboost['eval_proba'],
+        holdout_catboost['classes']
+    )
+    class_df = build_multiclass_class_df(
+        holdout_catboost['eval_target'],
+        holdout_pred,
+        holdout_catboost['classes']
+    )
+    importance_df = pd.DataFrame(
+        {
+            'feature': feature_info['feature_cols'],
+            'importance': np.round(holdout_catboost['model'].get_feature_importance(), 4)
+        }
+    ).sort_values('importance', ascending=False).reset_index(drop=True)
+    calibration_df = build_multiclass_calibration_df(
+        holdout_catboost['eval_target'],
+        holdout_catboost['eval_proba'],
+        holdout_catboost['classes']
+    )
+
+    focus_groups = (
+        dev_df[TARGET_COL]
+        .value_counts()
+        .head(12)
+        .index
+        .tolist()
+    )
+    confusion_df = build_multiclass_confusion_df(
+        holdout_catboost['eval_target'],
+        holdout_pred,
+        focus_groups
+    )
+
+    top_idx = np.argsort(holdout_catboost['eval_proba'], axis=1)[:, -MAX_TOP_K:][:, ::-1]
+    top_labels = np.asarray(holdout_catboost['classes'])[top_idx]
+    top_scores = np.take_along_axis(holdout_catboost['eval_proba'], top_idx, axis=1)
+    holdout_pred_df = holdout_df[[ID_COL, DATE_COL, TARGET_COL]].copy().reset_index(drop=True)
+    holdout_pred_df = holdout_pred_df.rename(columns={TARGET_COL: 'component_true'})
+    holdout_pred_df['component_pred'] = holdout_pred
+    holdout_pred_df['component_correct_top1'] = holdout_pred_df['component_true'].eq(holdout_pred_df['component_pred'])
+    holdout_pred_df['component_correct_top3'] = [
+        truth in labels
+        for truth, labels in zip(holdout_pred_df['component_true'], top_labels)
+    ]
+    holdout_pred_df['pred_confidence_top1'] = np.round(top_scores[:, 0], 6)
+    for rank in [1, 2, 3]:
+        holdout_pred_df[f'pred_top{rank}'] = top_labels[:, rank - 1]
+        holdout_pred_df[f'pred_top{rank}_proba'] = np.round(top_scores[:, rank - 1], 6)
 
     split_path = OUTPUTS_DIR / SPLIT_NAME
     metric_path = OUTPUTS_DIR / METRIC_NAME
     class_path = OUTPUTS_DIR / CLASS_NAME
     importance_path = OUTPUTS_DIR / IMPORTANCE_NAME
-    params_path = OUTPUTS_DIR / PARAMS_NAME
+    calib_path = OUTPUTS_DIR / CALIB_NAME
+    confusion_path = OUTPUTS_DIR / CONFUSION_NAME
+    manifest_path = OUTPUTS_DIR / MANIFEST_NAME
+    model_path = OUTPUTS_DIR / MODEL_NAME
     pred_path = write_dataframe(
-        pred_df,
-        OUTPUTS_DIR / VALID_PRED_STEM,
+        holdout_pred_df,
+        OUTPUTS_DIR / HOLDOUT_PRED_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    model_path = OUTPUTS_DIR / MODEL_NAME
 
     split_df.to_csv(split_path, index=False)
     metric_df.to_csv(metric_path, index=False)
     class_df.to_csv(class_path, index=False)
     importance_df.to_csv(importance_path, index=False)
+    calibration_df.to_csv(calib_path, index=False)
+    confusion_df.to_csv(confusion_path, index=False)
+    holdout_catboost['model'].save_model(model_path.as_posix())
 
-    run_info['split_rows'] = {
-        'train': int(len(train_df)),
-        'valid_2025': int(len(valid_df)),
-        'holdout_2026': int(len(holdout_df))
+    holdout_metric_row = metric_df.loc[
+        metric_df['model'].eq('CatBoost')
+        & metric_df['stage'].eq('final_holdout')
+        & metric_df['split'].eq('holdout_2026')
+    ].iloc[0]
+    manifest = {
+        'artifact_role': 'final_benchmark',
+        'target_scope': 'single_label_benchmark',
+        'input_stem': SINGLE_INPUT_STEM,
+        'input_path': str(input_path),
+        'input_sha256': sha256_path(input_path),
+        'selection_manifest_path': str(selection_manifest_path),
+        'selection_manifest_sha256': sha256_path(selection_manifest_path),
+        'selected_feature_set': feature_info['feature_set_name'],
+        'feature_manifest': feature_info,
+        'best_params': best_params,
+        'selected_iteration': selected_iteration,
+        'official_metric': 'macro_f1 on holdout_2026',
+        'official_holdout_metrics': holdout_metric_row.to_dict(),
+        'candidate_models': ['Most Frequent Label', 'Logistic Regression', 'HistGradientBoosting', 'CatBoost'],
+        'runtime': runtime_manifest(),
+        'code_version': {
+            'git_head': get_git_head(),
+            'git_dirty': get_git_dirty_flag()
+        },
+        'split_policy': {
+            'train_end': str(TRAIN_END.date()),
+            'valid_end': str(VALID_END.date()),
+            'holdout_policy': '2026 holdout untouched during feature selection and tuning'
+        },
+        'selection_summary': selection_manifest.get('selection_metrics'),
+        'split_rows': {
+            'train': int(len(train_df)),
+            'valid_2025': int(len(valid_df)),
+            'holdout_2026': int(len(holdout_df)),
+            'dev_2020_2025': int(len(dev_df))
+        }
     }
-    with params_path.open('w', encoding='utf-8') as handle:
-        json.dump(run_info, handle, indent=2)
+    write_json(manifest, manifest_path)
 
-    model.save_model(model_path.as_posix())
+    if not args.skip_readme_update:
+        try:
+            from src.reporting.update_component_readme import update_component_readme
+
+            update_component_readme(single_manifest_path=manifest_path)
+        except Exception as exc:
+            print(f'[warn] README benchmark update skipped: {exc}')
 
     print(f'[write] {split_path}')
     print(f'[write] {metric_path}')
     print(f'[write] {class_path}')
     print(f'[write] {importance_path}')
-    print(f'[write] {params_path}')
+    print(f'[write] {calib_path}')
+    print(f'[write] {confusion_path}')
     print(f'[write] {pred_path}')
+    print(f'[write] {manifest_path}')
     print(f'[write] {model_path}')
     print('')
-    print('[done] Component CatBoost benchmark finished')
+    print('[done] Single-label component benchmark finished')
     return 0
 
 
