@@ -9,7 +9,7 @@ This repository is designed for a DSBA 6156 (Machine Learning) group project. Th
 - easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
 
-The current workflow already covers complaint ingestion, EDA, audited cleaning, component target construction, and a time-aware structured benchmark for component prediction. The next major steps are complaint severity ranking and NLP-driven early warning.
+The current workflow already covers complaint ingestion, EDA, audited cleaning, single-label and multi-label component target construction, and reproducible benchmark scripts for structured component prediction. The next major steps are complaint severity ranking and NLP-driven early warning.
 
 ## Project Overview
 
@@ -34,16 +34,40 @@ The repo is now beyond the initial scaffold stage. Current completed work includ
 - `notebooks/EDA.ipynb`: structural audit of the complaint data
 - `notebooks/Cleaning.ipynb`: reviewed cleaning decisions tied to `docs/CMPL.txt`
 - `src/preprocessing/clean_complaints.py`: reproducible shared cleaning pipeline
-- `src/features/collapse_components.py`: case-level component modeling table builder
-- `notebooks/Component_Modeling.ipynb`: baseline modeling workflow and structured model review
-- `src/modeling/component_catboost.py`: reproducible CatBoost benchmark script
-- `src/modeling/tune_component_catboost.py`: focused Optuna tuning for the component model
+- `src/features/collapse_components.py`: single-label and multi-label component case table builder
+- `notebooks/Component_Modeling.ipynb`: exploratory modeling workflow for the original single-label benchmark
+- `src/modeling/tune_component_catboost.py`: canonical single-label feature selection + focused CatBoost model selection
+- `src/modeling/component_catboost.py`: final single-label benchmark with baselines and untouched 2026 holdout scoring
+- `src/modeling/component_multilabel.py`: multi-label routing benchmark on the full kept-case problem
 
-Current structured component benchmark on the `2025` validation split:
+<!-- COMPONENT_BENCHMARK_START -->
+### Generated Benchmark Snapshot
 
-- top-1 accuracy: `0.3601`
-- macro F1: `0.2420`
-- top-3 accuracy: `0.5873`
+This section is generated from the benchmark manifests in `data/outputs/`.
+The official published component-model scores come from the untouched `2026` holdout.
+
+#### Single-label structured benchmark
+
+- Scope: scoped baseline on the single-label complaint subset
+- Feature set: `core_structured`
+- Selected CatBoost iteration: `1595`
+- Holdout macro F1: `0.3319`
+- Holdout top-1 accuracy: `0.4722`
+- Holdout top-3 accuracy: `0.7052`
+
+#### Multi-label routing benchmark
+
+- Scope: full kept-case complaint routing benchmark
+- Model: `CatBoost MultiLabel`
+- Feature set: `core_structured`
+- Threshold: `0.2`
+- Selected iteration: `1200`
+- Holdout macro F1: `0.2285`
+- Holdout micro F1: `0.4571`
+- Holdout recall@3: `0.6751`
+- Holdout precision@3: `0.3027`
+
+<!-- COMPONENT_BENCHMARK_END -->
 
 ## Repository Structure
 
@@ -231,9 +255,10 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Current examples include:
   - `clean_complaints_summary.csv`
   - `collapse_components_summary.csv`
-  - `component_catboost_metrics.csv`
-  - `component_catboost_feature_importance.csv`
-  - `component_catboost_params.json`
+  - `component_single_label_selection_manifest.json`
+  - `component_single_label_benchmark_metrics.csv`
+  - `component_single_label_feature_importance.csv`
+  - `component_multilabel_metrics.csv`
 - Ignored by Git
 
 ### `scripts/` (quick setup commands)
@@ -291,7 +316,8 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 `notebooks/Component_Modeling.ipynb`
 
-- Modeling notebook for time-aware baselines, CatBoost benchmarking, and component-model diagnostics
+- Exploratory notebook for the original single-label structured benchmark
+- Useful for diagnosis and ideas, but not the source of truth for published benchmark numbers
 
 ### `src/` ("source" folder, contains main Python files grouped by objective)
 
@@ -325,13 +351,14 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `src/features/`
 
 - Feature engineering code for ML/NLP/time-based models
-- `collapse_components.py`: builds the case-level single-label component modeling table
+- `collapse_components.py`: builds the single-label benchmark case table and the broader multi-label routing table
 
 `src/modeling/`
 
 - Model training logic (baselines first, then stronger models)
-- `component_catboost.py`: structured benchmark for component prediction
-- `tune_component_catboost.py`: focused Optuna tuning around the CatBoost benchmark
+- `component_catboost.py`: final single-label benchmark with baselines, holdout scoring, calibration, and manifests
+- `tune_component_catboost.py`: single-label feature-set selection plus focused CatBoost tuning
+- `component_multilabel.py`: multi-label routing benchmark for the full kept-case target
 
 `src/evaluation/`
 
@@ -598,7 +625,9 @@ After raw ingestion, the current analysis flow is:
 
 1. shared cleaning
 2. component case collapse
-3. structured component benchmark
+3. single-label model selection
+4. single-label holdout benchmark
+5. multi-label routing benchmark
 
 #### Shared cleaning
 
@@ -612,25 +641,44 @@ After raw ingestion, the current analysis flow is:
 .\.venv\Scripts\python.exe -m src.features.collapse_components --output-format parquet
 ```
 
-#### Structured component benchmark
+#### Single-label model selection
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type CPU --n-trials 40 --seed-list 42,43,44,45,46
+```
+
+For a lighter local shakeout run that starts reporting progress immediately and skips the feature sweep unless you override it:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --quick
+```
+
+If you want a middle ground instead of the full canonical run, keep your own trial count and seeds but bypass the feature sweep explicitly:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --feature-set core_structured --n-trials 12 --seed-list 42,43
+```
+
+#### Single-label holdout benchmark
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.modeling.component_catboost --task-type CPU
 ```
 
-For GPU runtimes such as Colab:
+For GPU runtimes that reproduce the repo artifact contract:
 
 ```bash
+python -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --n-trials 40 --seed-list 42,43,44,45,46
 python -m src.modeling.component_catboost --task-type GPU --devices 0
 ```
 
-#### Focused CatBoost tuning
+#### Multi-label routing benchmark
 
-```bash
-python -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --n-trials 40 --seed-list 42,43
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.component_multilabel
 ```
 
-These commands produce the current benchmark artifacts in `data/processed/` and `data/outputs/`.
+These commands produce the benchmark tables and manifests used by the generated README benchmark section.
 
 ## Git Basics Overview
 
