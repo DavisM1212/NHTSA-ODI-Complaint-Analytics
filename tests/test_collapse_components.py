@@ -79,3 +79,34 @@ def test_case_level_threshold_and_multilabel_table():
     assert len(multi_case_df) == 252
     multi_case = multi_case_df.loc[multi_case_df['odino'].eq('1000'), 'component_groups'].iloc[0]
     assert multi_case == 'ELECTRONIC STABILITY CONTROL (ESC)|LANE DEPARTURE'
+    assert {'complaint_year', 'vehicle_age_years', 'state_region', 'prior_cmpl_mfr_all'}.issubset(single_case_bench_df.columns)
+    assert {'complaint_year', 'vehicle_age_years', 'state_region', 'prior_cmpl_mfr_all'}.issubset(multi_case_df.columns)
+
+
+def test_wave1_case_features_are_temporal_and_region_safe():
+    rows = [
+        make_component_row(1, 11, 'ENGINE / COOLING', ldate='2023-01-05'),
+        make_component_row(2, 21, 'ENGINE / COOLING', ldate='2024-01-05'),
+        make_component_row(3, 31, 'ENGINE / COOLING', ldate='2024-01-05'),
+        make_component_row(4, 41, 'ENGINE / COOLING', ldate='2025-01-05')
+    ]
+    rows[1]['state'] = 'zz'
+    rows[2]['state'] = 'nc'
+    rows[3]['yeartxt'] = None
+
+    component_df = pd.DataFrame(rows)
+    _, _, _, single_case_df, _, multi_case_df = build_case_tables(component_df)
+
+    row_1 = single_case_df.loc[single_case_df['odino'].eq('1')].iloc[0]
+    row_2 = single_case_df.loc[single_case_df['odino'].eq('2')].iloc[0]
+    row_3 = single_case_df.loc[single_case_df['odino'].eq('3')].iloc[0]
+    row_4 = single_case_df.loc[single_case_df['odino'].eq('4')].iloc[0]
+
+    assert int(row_1['prior_cmpl_mfr_all']) == 0
+    assert int(row_2['prior_cmpl_mfr_all']) == 1
+    assert int(row_3['prior_cmpl_mfr_all']) == 2
+    assert row_2['state_region'] == 'UNKNOWN'
+    assert row_3['state_region'] == 'SOUTH'
+    assert float(row_1['vehicle_age_years']) >= 0
+    assert pd.isna(row_4['vehicle_age_years'])
+    assert 'state_region' in multi_case_df.columns

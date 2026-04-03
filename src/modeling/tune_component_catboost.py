@@ -6,8 +6,8 @@ import pandas as pd
 
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.modeling.component_common import (
+    BENCHMARK_FEATURE_SET_NAMES,
     DEFAULT_SELECTION_SEEDS,
-    FEATURE_SET_DEFS,
     SINGLE_INPUT_STEM,
     TARGET_COL,
     TRAIN_END,
@@ -145,7 +145,7 @@ def resolve_run_config(args):
         'selection_eval_period': selection_eval_period,
         'manual_feature_set': manual_feature_set,
         'run_feature_selection': manual_feature_set is None,
-        'feature_set_names': [manual_feature_set] if manual_feature_set else list(FEATURE_SET_DEFS),
+        'feature_set_names': [manual_feature_set] if manual_feature_set else list(BENCHMARK_FEATURE_SET_NAMES),
         'quick_notes': quick_notes
     }
 
@@ -256,7 +256,7 @@ def build_manual_feature_selection(feature_set_name, selection_eval_period):
 def evaluate_feature_sets(train_df, valid_df, task_type, devices, seed_list, verbose, selection_eval_period, feature_set_names=None):
     rows = []
     feature_results = {}
-    feature_set_names = list(FEATURE_SET_DEFS) if feature_set_names is None else list(feature_set_names)
+    feature_set_names = list(BENCHMARK_FEATURE_SET_NAMES) if feature_set_names is None else list(feature_set_names)
     total_feature_sets = len(feature_set_names)
 
     for feature_idx, feature_set_name in enumerate(feature_set_names, start=1):
@@ -424,7 +424,7 @@ def parse_args():
     )
     parser.add_argument(
         '--feature-set',
-        choices=sorted(FEATURE_SET_DEFS),
+        choices=sorted(BENCHMARK_FEATURE_SET_NAMES),
         default=None,
         help='Optional feature set name to use directly and skip the feature sweep'
     )

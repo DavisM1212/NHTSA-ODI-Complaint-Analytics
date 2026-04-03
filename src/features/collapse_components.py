@@ -25,6 +25,72 @@ TARGET_GROUP_NAME = 'component_target_scope_groups.csv'
 # Collapse rules
 # -----------------------------------------------------------------------------
 SINGLE_LABEL_MIN_CASES = 250
+STATE_REGION_MAP = {
+    'CT': 'NORTHEAST',
+    'ME': 'NORTHEAST',
+    'MA': 'NORTHEAST',
+    'NH': 'NORTHEAST',
+    'RI': 'NORTHEAST',
+    'VT': 'NORTHEAST',
+    'NJ': 'NORTHEAST',
+    'NY': 'NORTHEAST',
+    'PA': 'NORTHEAST',
+    'IL': 'MIDWEST',
+    'IN': 'MIDWEST',
+    'MI': 'MIDWEST',
+    'OH': 'MIDWEST',
+    'WI': 'MIDWEST',
+    'IA': 'MIDWEST',
+    'KS': 'MIDWEST',
+    'MN': 'MIDWEST',
+    'MO': 'MIDWEST',
+    'NE': 'MIDWEST',
+    'ND': 'MIDWEST',
+    'SD': 'MIDWEST',
+    'DE': 'SOUTH',
+    'FL': 'SOUTH',
+    'GA': 'SOUTH',
+    'MD': 'SOUTH',
+    'NC': 'SOUTH',
+    'SC': 'SOUTH',
+    'VA': 'SOUTH',
+    'DC': 'SOUTH',
+    'WV': 'SOUTH',
+    'AL': 'SOUTH',
+    'KY': 'SOUTH',
+    'MS': 'SOUTH',
+    'TN': 'SOUTH',
+    'AR': 'SOUTH',
+    'LA': 'SOUTH',
+    'OK': 'SOUTH',
+    'TX': 'SOUTH',
+    'AZ': 'WEST',
+    'CO': 'WEST',
+    'ID': 'WEST',
+    'MT': 'WEST',
+    'NV': 'WEST',
+    'NM': 'WEST',
+    'UT': 'WEST',
+    'WY': 'WEST',
+    'AK': 'WEST',
+    'CA': 'WEST',
+    'HI': 'WEST',
+    'OR': 'WEST',
+    'WA': 'WEST',
+    'AS': 'TERRITORY',
+    'FM': 'TERRITORY',
+    'GU': 'TERRITORY',
+    'MH': 'TERRITORY',
+    'MP': 'TERRITORY',
+    'PR': 'TERRITORY',
+    'PW': 'TERRITORY',
+    'VI': 'TERRITORY',
+    'AA': 'MILITARY',
+    'AE': 'MILITARY',
+    'AP': 'MILITARY'
+}
+VEHICLE_AGE_BUCKETS = [-1, 0, 3, 7, 12, 200]
+VEHICLE_AGE_LABELS = ['AGE_0', 'AGE_1_3', 'AGE_4_7', 'AGE_8_12', 'AGE_13_PLUS']
 
 CASE_FIRST_COLS = [
     'source_era',
@@ -101,6 +167,18 @@ SINGLE_MODEL_COLS = [
     'ldate',
     'faildate',
     'lag_days_safe',
+    'complaint_year',
+    'complaint_month',
+    'complaint_quarter',
+    'vehicle_age_years',
+    'vehicle_age_bucket',
+    'state_region',
+    'prior_cmpl_mfr_all',
+    'prior_cmpl_make_model_all',
+    'prior_cmpl_make_model_year_all',
+    'prior_severity_share_mfr_all',
+    'prior_severity_share_make_model_all',
+    'prior_severity_share_make_model_year_all',
     'cmpl_type',
     'drive_train',
     'fuel_sys',
@@ -154,6 +232,18 @@ MULTI_MODEL_COLS = [
     'ldate',
     'faildate',
     'lag_days_safe',
+    'complaint_year',
+    'complaint_month',
+    'complaint_quarter',
+    'vehicle_age_years',
+    'vehicle_age_bucket',
+    'state_region',
+    'prior_cmpl_mfr_all',
+    'prior_cmpl_make_model_all',
+    'prior_cmpl_make_model_year_all',
+    'prior_severity_share_mfr_all',
+    'prior_severity_share_make_model_all',
+    'prior_severity_share_make_model_year_all',
     'cmpl_type',
     'drive_train',
     'fuel_sys',
@@ -231,13 +321,15 @@ def collapse_case_features(case_rows, target_mode):
     frames = [grouped.size().rename('component_row_count')]
     if target_mode == 'single':
         frames.append(grouped['component_group'].first())
-    else:
+    elif target_mode == 'multi':
         frames.append(
             grouped['component_group']
             .agg(lambda s: '|'.join(sorted(pd.Series(s.dropna().astype(str).unique()).tolist())))
             .rename('component_groups')
         )
         frames.append(grouped['component_group'].nunique(dropna=True).rename('component_group_count'))
+    elif target_mode != 'base':
+        raise ValueError(f'Unknown target_mode: {target_mode}')
 
     first_cols = [column for column in CASE_FIRST_COLS if column in case_rows.columns]
     if first_cols:
@@ -283,6 +375,76 @@ def collapse_case_features(case_rows, target_mode):
     )
 
 
+def build_sort_keys(case_df):
+    work = case_df.copy()
+    work['__odino_num'] = pd.to_numeric(work['odino'], errors='coerce')
+    return work.sort_values(
+        ['ldate', '__odino_num', 'odino'],
+        na_position='last'
+    ).reset_index(drop=True)
+
+
+def add_vehicle_age_fields(case_df):
+    case_df = case_df.copy()
+    case_df['complaint_year'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.year.astype('Int64')
+    case_df['complaint_month'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.month.astype('Int64')
+    case_df['complaint_quarter'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.quarter.astype('Int64')
+
+    model_year = pd.to_numeric(case_df['yeartxt'], errors='coerce')
+    vehicle_age = case_df['complaint_year'].astype('Float64') - model_year.astype('Float64')
+    vehicle_age = vehicle_age.where(vehicle_age.ge(0))
+    case_df['vehicle_age_years'] = vehicle_age
+    age_bucket = pd.cut(
+        vehicle_age,
+        bins=VEHICLE_AGE_BUCKETS,
+        labels=VEHICLE_AGE_LABELS,
+        include_lowest=True
+    )
+    case_df['vehicle_age_bucket'] = age_bucket.astype('string')
+    return case_df
+
+
+def add_state_region(case_df):
+    case_df = case_df.copy()
+    state = case_df['state'].astype('string').str.upper()
+    case_df['state_region'] = state.map(STATE_REGION_MAP).fillna('UNKNOWN').astype(str)
+    return case_df
+
+
+def add_prior_history_features(case_df):
+    work = build_sort_keys(case_df)
+    severity = work['severity_broad_flag'].fillna(False).astype(int)  # noqa: F841
+
+    history_specs = [
+        ('mfr_name', 'prior_cmpl_mfr_all', 'prior_severity_share_mfr_all'),
+        (['maketxt', 'modeltxt'], 'prior_cmpl_make_model_all', 'prior_severity_share_make_model_all'),
+        (
+            ['maketxt', 'modeltxt', 'yeartxt'],
+            'prior_cmpl_make_model_year_all',
+            'prior_severity_share_make_model_year_all'
+        )
+    ]
+
+    for key_cols, count_name, share_name in history_specs:
+        key_cols = [key_cols] if isinstance(key_cols, str) else list(key_cols)
+        grouped = work.groupby(key_cols, sort=False, dropna=False)
+        prior_count = grouped.cumcount()
+        prior_severity_count = grouped['severity_broad_flag'].transform(
+            lambda s: s.fillna(False).astype(int).cumsum() - s.fillna(False).astype(int)
+        )
+        work[count_name] = prior_count.astype('Int64')
+        prior_share = prior_severity_count.astype(float) / prior_count.replace(0, pd.NA)
+        work[share_name] = pd.Series(prior_share, index=work.index).astype('Float64')
+
+    return work.drop(columns=['__odino_num'])
+
+
+def add_wave1_case_features(case_df):
+    case_df = add_vehicle_age_fields(case_df)
+    case_df = add_state_region(case_df)
+    return add_prior_history_features(case_df)
+
+
 def build_case_tables(component_df):
     keep_df = component_df.loc[
         component_df['component_keep_flag'].fillna(False) & component_df['odino'].notna()
@@ -300,7 +462,14 @@ def build_case_tables(component_df):
     if single_rows.empty:
         raise ValueError('No single-label component cases found after filtering')
 
-    single_case_df = collapse_case_features(single_rows, target_mode='single')
+    base_case_df = add_wave1_case_features(collapse_case_features(keep_df, target_mode='base'))
+    single_target_df = collapse_case_features(single_rows, target_mode='single')[['odino', 'component_group']]
+    single_case_df = base_case_df.loc[base_case_df['odino'].isin(single_ids)].merge(
+        single_target_df,
+        on='odino',
+        how='left',
+        validate='one_to_one'
+    )
     single_case_counts = single_case_df['component_group'].value_counts()
     single_case_df['component_group_case_count'] = (
         single_case_df['component_group']
@@ -312,7 +481,13 @@ def build_case_tables(component_df):
     keep_cols = [column for column in SINGLE_MODEL_COLS if column in single_case_bench_df.columns]
     single_case_bench_df = single_case_bench_df.loc[:, keep_cols].sort_values('odino').reset_index(drop=True)
 
-    multi_case_df = collapse_case_features(keep_df, target_mode='multi')
+    multi_target_df = collapse_case_features(keep_df, target_mode='multi')[['odino', 'component_groups', 'component_group_count']]
+    multi_case_df = base_case_df.merge(
+        multi_target_df,
+        on='odino',
+        how='left',
+        validate='one_to_one'
+    )
     multi_keep_cols = [column for column in MULTI_MODEL_COLS if column in multi_case_df.columns]
     multi_case_df = multi_case_df.loc[:, multi_keep_cols].sort_values('odino').reset_index(drop=True)
 

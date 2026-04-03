@@ -29,16 +29,73 @@ MULTI_TARGET_COL = 'component_groups'
 TRAIN_END = pd.Timestamp('2024-12-31')
 VALID_END = pd.Timestamp('2025-12-31')
 TRAIN_VALID_END = VALID_END
+TRAIN_CORE_END = pd.Timestamp('2023-12-31')
+SCREEN_END = pd.Timestamp('2024-12-31')
+SELECT_END = pd.Timestamp('2025-12-31')
 SINGLE_INPUT_STEM = 'odi_component_model_cases'
 MULTI_INPUT_STEM = 'odi_component_multilabel_cases'
 DEFAULT_SELECTION_SEEDS = [42, 43, 44, 45, 46]
 MAX_TOP_K = 3
+BENCHMARK_SPLIT_MODE = 'benchmark_v1'
+FEATURE_WAVE1_SPLIT_MODE = 'feature_wave1'
 
 
 # -----------------------------------------------------------------------------
 # Feature ladder
 # -----------------------------------------------------------------------------
 CAT_FEATURES = [
+    'mfr_name',
+    'maketxt',
+    'modeltxt',
+    'state',
+    'state_region',
+    'cmpl_type',
+    'drive_train',
+    'fuel_sys',
+    'fuel_type',
+    'trans_type',
+    'fire',
+    'crash',
+    'medical_attn',
+    'vehicles_towed_yn',
+    'police_rpt_yn',
+    'repaired_yn',
+    'vehicle_age_bucket'
+]
+
+NUM_FEATURES = [
+    'yeartxt',
+    'miles',
+    'veh_speed',
+    'injured',
+    'lag_days_safe',
+    'complaint_year',
+    'complaint_month',
+    'complaint_quarter',
+    'vehicle_age_years',
+    'prior_cmpl_mfr_all',
+    'prior_cmpl_make_model_all',
+    'prior_cmpl_make_model_year_all',
+    'prior_severity_share_mfr_all',
+    'prior_severity_share_make_model_all',
+    'prior_severity_share_make_model_year_all'
+]
+
+FLAG_FEATURES = [
+    'miles_missing_flag',
+    'veh_speed_missing_flag',
+    'miles_zero_flag',
+    'veh_speed_zero_flag',
+    'faildate_trusted_flag',
+    'flag_date_order_bad',
+    'flag_fail_pre_model',
+    'flag_fail_pre_model_far',
+    'severity_primary_flag',
+    'severity_broad_flag',
+    'flag_year_out_of_range'
+]
+
+CORE_STRUCTURED_FEATURES = [
     'mfr_name',
     'maketxt',
     'modeltxt',
@@ -52,112 +109,167 @@ CAT_FEATURES = [
     'crash',
     'medical_attn',
     'vehicles_towed_yn',
-    'police_rpt_yn',
-    'repaired_yn'
-]
-
-NUM_FEATURES = [
     'yeartxt',
     'miles',
     'veh_speed',
     'injured',
-    'lag_days_safe'
-]
-
-FLAG_FEATURES = [
+    'lag_days_safe',
     'miles_missing_flag',
     'veh_speed_missing_flag',
     'miles_zero_flag',
-    'veh_speed_zero_flag',
-    'faildate_trusted_flag',
-    'flag_date_order_bad',
-    'flag_fail_pre_model',
-    'flag_fail_pre_model_far'
+    'veh_speed_zero_flag'
+]
+
+WAVE1_BUNDLE_DEFS = {
+    'incident_bundle': [
+        'police_rpt_yn',
+        'repaired_yn',
+        'severity_broad_flag',
+        'severity_primary_flag'
+    ],
+    'date_quality_bundle': [
+        'faildate_trusted_flag',
+        'flag_date_order_bad',
+        'flag_fail_pre_model',
+        'flag_fail_pre_model_far',
+        'flag_year_out_of_range'
+    ],
+    'geo_time_bundle': [
+        'complaint_year',
+        'complaint_month',
+        'complaint_quarter',
+        'vehicle_age_years',
+        'vehicle_age_bucket',
+        'state_region'
+    ],
+    'cohort_history_bundle': [
+        'prior_cmpl_mfr_all',
+        'prior_cmpl_make_model_all',
+        'prior_cmpl_make_model_year_all',
+        'prior_severity_share_mfr_all',
+        'prior_severity_share_make_model_all',
+        'prior_severity_share_make_model_year_all'
+    ]
+}
+
+WAVE1_PAIRWISE_FAMILIES = {
+    'wave1_incident_geo_time': ['incident_bundle', 'geo_time_bundle'],
+    'wave1_incident_cohort_history': ['incident_bundle', 'cohort_history_bundle'],
+    'wave1_date_quality_cohort_history': ['date_quality_bundle', 'cohort_history_bundle']
+}
+
+WAVE1_PRUNE_QUEUE = [
+    'miles_zero_flag',
+    'fire',
+    'medical_attn',
+    'injured',
+    'fuel_sys',
+    'veh_speed_missing_flag',
+    'vehicles_towed_yn'
+]
+
+WAVE1_PRUNE_PROTECTED = [
+    'mfr_name',
+    'maketxt',
+    'modeltxt',
+    'yeartxt',
+    'state',
+    'cmpl_type',
+    'miles',
+    'veh_speed',
+    'lag_days_safe'
+]
+
+WAVE1_EXCLUDED_COLS = [
+    'orig_owner_yn',
+    'anti_brakes_yn',
+    'cruise_cont_yn',
+    'num_cyls',
+    'deaths',
+    'faildate_untrusted_flag',
+    'flag_year_unknown',
+    'flag_speed_high',
+    'flag_miles_high'
+]
+
+AUDIT_ONLY_COLS = [
+    'source_era',
+    'source_zip',
+    'source_file'
 ]
 
 FEATURE_SET_DEFS = {
-    'core_structured': [
-        'mfr_name',
-        'maketxt',
-        'modeltxt',
-        'state',
-        'cmpl_type',
-        'drive_train',
-        'fuel_sys',
-        'fuel_type',
-        'trans_type',
-        'fire',
-        'crash',
-        'medical_attn',
-        'vehicles_towed_yn',
-        'yeartxt',
-        'miles',
-        'veh_speed',
-        'injured',
-        'lag_days_safe',
-        'miles_missing_flag',
-        'veh_speed_missing_flag',
-        'miles_zero_flag',
-        'veh_speed_zero_flag'
-    ],
+    'core_structured': CORE_STRUCTURED_FEATURES,
     'core_plus_quality': [
-        'mfr_name',
-        'maketxt',
-        'modeltxt',
-        'state',
-        'cmpl_type',
-        'drive_train',
-        'fuel_sys',
-        'fuel_type',
-        'trans_type',
-        'fire',
-        'crash',
-        'medical_attn',
-        'vehicles_towed_yn',
-        'yeartxt',
-        'miles',
-        'veh_speed',
-        'injured',
-        'lag_days_safe',
-        'miles_missing_flag',
-        'veh_speed_missing_flag',
-        'miles_zero_flag',
-        'veh_speed_zero_flag',
+        *CORE_STRUCTURED_FEATURES,
         'faildate_trusted_flag',
         'flag_date_order_bad',
         'flag_fail_pre_model',
         'flag_fail_pre_model_far'
     ],
     'core_plus_stable_incident': [
-        'mfr_name',
-        'maketxt',
-        'modeltxt',
-        'state',
-        'cmpl_type',
-        'drive_train',
-        'fuel_sys',
-        'fuel_type',
-        'trans_type',
-        'fire',
-        'crash',
-        'medical_attn',
-        'vehicles_towed_yn',
+        *CORE_STRUCTURED_FEATURES,
         'police_rpt_yn',
         'repaired_yn',
-        'yeartxt',
-        'miles',
-        'veh_speed',
-        'injured',
-        'lag_days_safe',
-        'miles_missing_flag',
-        'veh_speed_missing_flag',
-        'miles_zero_flag',
-        'veh_speed_zero_flag',
         'faildate_trusted_flag',
         'flag_date_order_bad',
         'flag_fail_pre_model',
         'flag_fail_pre_model_far'
-    ]
+    ],
+    'wave1_incident_bundle': CORE_STRUCTURED_FEATURES + WAVE1_BUNDLE_DEFS['incident_bundle'],
+    'wave1_date_quality_bundle': CORE_STRUCTURED_FEATURES + WAVE1_BUNDLE_DEFS['date_quality_bundle'],
+    'wave1_geo_time_bundle': CORE_STRUCTURED_FEATURES + WAVE1_BUNDLE_DEFS['geo_time_bundle'],
+    'wave1_cohort_history_bundle': CORE_STRUCTURED_FEATURES + WAVE1_BUNDLE_DEFS['cohort_history_bundle'],
+    'wave1_incident_geo_time': (
+        CORE_STRUCTURED_FEATURES
+        + WAVE1_BUNDLE_DEFS['incident_bundle']
+        + WAVE1_BUNDLE_DEFS['geo_time_bundle']
+    ),
+    'wave1_incident_cohort_history': (
+        CORE_STRUCTURED_FEATURES
+        + WAVE1_BUNDLE_DEFS['incident_bundle']
+        + WAVE1_BUNDLE_DEFS['cohort_history_bundle']
+    ),
+    'wave1_date_quality_cohort_history': (
+        CORE_STRUCTURED_FEATURES
+        + WAVE1_BUNDLE_DEFS['date_quality_bundle']
+        + WAVE1_BUNDLE_DEFS['cohort_history_bundle']
+    )
+}
+
+BENCHMARK_FEATURE_SET_NAMES = [
+    'core_structured',
+    'core_plus_quality',
+    'core_plus_stable_incident'
+]
+
+SPLIT_POLICIES = {
+    BENCHMARK_SPLIT_MODE: {
+        'train_end': TRAIN_END,
+        'valid_end': VALID_END,
+        'train_name': 'train',
+        'valid_name': 'valid_2025',
+        'holdout_name': 'holdout_2026',
+        'selection_train_name': 'train',
+        'selection_eval_name': 'valid_2025',
+        'dev_name': 'dev_2020_2025',
+        'holdout_policy': '2026 holdout untouched during feature selection and tuning'
+    },
+    FEATURE_WAVE1_SPLIT_MODE: {
+        'train_core_end': TRAIN_CORE_END,
+        'screen_end': SCREEN_END,
+        'select_end': SELECT_END,
+        'train_name': 'train_core',
+        'screen_name': 'screen_2024',
+        'select_name': 'select_2025',
+        'holdout_name': 'holdout_2026',
+        'selection_train_name': 'train_core',
+        'selection_eval_name': 'screen_2024',
+        'select_train_name': 'dev_2020_2024',
+        'select_eval_name': 'select_2025',
+        'dev_name': 'dev_2020_2025',
+        'holdout_policy': '2026 holdout untouched during feature-family screening and promotion'
+    }
 }
 
 
@@ -277,23 +389,85 @@ def write_json(payload, output_path):
 # -----------------------------------------------------------------------------
 # Feature helpers
 # -----------------------------------------------------------------------------
+def dedupe_feature_cols(feature_cols):
+    seen = set()
+    ordered = []
+    for column in feature_cols:
+        if column in seen:
+            continue
+        seen.add(column)
+        ordered.append(column)
+    return ordered
+
+
+def classify_feature_columns(feature_cols):
+    feature_cols = dedupe_feature_cols(feature_cols)
+    cat_cols = [column for column in feature_cols if column in CAT_FEATURES]
+    num_cols = [column for column in feature_cols if column in NUM_FEATURES]
+    flag_cols = [column for column in feature_cols if column in FLAG_FEATURES]
+    return {
+        'feature_cols': feature_cols,
+        'cat_cols': cat_cols,
+        'num_cols': num_cols,
+        'flag_cols': flag_cols
+    }
+
+
 def feature_manifest(feature_set_name):
     if feature_set_name not in FEATURE_SET_DEFS:
         choices = ', '.join(sorted(FEATURE_SET_DEFS))
         raise ValueError(f'Unknown feature set {feature_set_name}. Choices: {choices}')
 
     feature_cols = list(FEATURE_SET_DEFS[feature_set_name])
-    cat_cols = [column for column in feature_cols if column in CAT_FEATURES]
-    num_cols = [column for column in feature_cols if column in NUM_FEATURES]
-    flag_cols = [column for column in feature_cols if column in FLAG_FEATURES]
+    feature_info = classify_feature_columns(feature_cols)
 
     return {
         'feature_set_name': feature_set_name,
-        'feature_cols': feature_cols,
-        'cat_cols': cat_cols,
-        'num_cols': num_cols,
-        'flag_cols': flag_cols
+        'feature_cols': feature_info['feature_cols'],
+        'cat_cols': feature_info['cat_cols'],
+        'num_cols': feature_info['num_cols'],
+        'flag_cols': feature_info['flag_cols']
     }
+
+
+def compose_feature_manifest(feature_set_name, add_cols=None, remove_cols=None, base_feature_set='core_structured'):
+    base_manifest = feature_manifest(base_feature_set)
+    add_cols = [] if add_cols is None else list(add_cols)
+    remove_cols = [] if remove_cols is None else list(remove_cols)
+    feature_cols = [column for column in base_manifest['feature_cols'] if column not in remove_cols]
+    feature_cols.extend(add_cols)
+    feature_info = classify_feature_columns(feature_cols)
+    return {
+        'feature_set_name': feature_set_name,
+        'base_feature_set': base_feature_set,
+        'added_cols': dedupe_feature_cols(add_cols),
+        'removed_cols': dedupe_feature_cols(remove_cols),
+        'feature_cols': feature_info['feature_cols'],
+        'cat_cols': feature_info['cat_cols'],
+        'num_cols': feature_info['num_cols'],
+        'flag_cols': feature_info['flag_cols']
+    }
+
+
+def all_feature_columns():
+    cols = []
+    for feature_cols in FEATURE_SET_DEFS.values():
+        cols.extend(feature_cols)
+    return dedupe_feature_cols(cols)
+
+
+def get_split_policy(split_mode=BENCHMARK_SPLIT_MODE):
+    if split_mode not in SPLIT_POLICIES:
+        choices = ', '.join(sorted(SPLIT_POLICIES))
+        raise ValueError(f'Unknown split_mode {split_mode}. Choices: {choices}')
+    return SPLIT_POLICIES[split_mode]
+
+
+def validate_unseen_single_label(train_target, eval_target, split_name):
+    unseen = sorted(set(eval_target) - set(train_target))
+    if unseen:
+        unseen_text = ', '.join(unseen)
+        raise ValueError(f'{split_name} has unseen target labels: {unseen_text}')
 
 
 def require_case_columns(df, feature_cols, target_col=TARGET_COL):
@@ -312,13 +486,11 @@ def prep_single_label_cases(df, feature_cols):
         missing_dates = int(work[DATE_COL].isna().sum())
         raise ValueError(f'Found {missing_dates} rows with invalid {DATE_COL} values')
 
-    manifest = feature_manifest(
-        next(name for name, cols in FEATURE_SET_DEFS.items() if list(cols) == list(feature_cols))
-    )
-    for column in manifest['cat_cols']:
+    feature_info = classify_feature_columns(feature_cols)
+    for column in feature_info['cat_cols']:
         work[column] = work[column].astype('string').fillna('__MISSING__').astype(str)
 
-    for column in manifest['num_cols'] + manifest['flag_cols']:
+    for column in feature_info['num_cols'] + feature_info['flag_cols']:
         work[column] = pd.to_numeric(work[column], errors='coerce')
 
     return work.sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
@@ -339,32 +511,27 @@ def prep_multi_label_cases(df, feature_cols):
     return work
 
 
-def split_single_label_cases(df):
-    train_df = df.loc[df[DATE_COL] <= TRAIN_END].copy()
-    valid_df = df.loc[(df[DATE_COL] > TRAIN_END) & (df[DATE_COL] <= VALID_END)].copy()
-    holdout_df = df.loc[df[DATE_COL] > VALID_END].copy()
+def split_single_label_cases_by_mode(df, split_mode=BENCHMARK_SPLIT_MODE):
+    policy = get_split_policy(split_mode)
 
-    if train_df.empty:
-        raise ValueError('Training split is empty')
-    if valid_df.empty:
-        raise ValueError('Validation split is empty')
-    if holdout_df.empty:
-        raise ValueError('Holdout split is empty')
+    if split_mode == BENCHMARK_SPLIT_MODE:
+        train_df = df.loc[df[DATE_COL] <= policy['train_end']].copy()
+        valid_df = df.loc[(df[DATE_COL] > policy['train_end']) & (df[DATE_COL] <= policy['valid_end'])].copy()
+        holdout_df = df.loc[df[DATE_COL] > policy['valid_end']].copy()
 
-    unseen_valid = sorted(set(valid_df[TARGET_COL]) - set(train_df[TARGET_COL]))
-    if unseen_valid:
-        unseen_text = ', '.join(unseen_valid)
-        raise ValueError(f'Validation split has unseen target labels: {unseen_text}')
+        if train_df.empty:
+            raise ValueError('Training split is empty')
+        if valid_df.empty:
+            raise ValueError('Validation split is empty')
+        if holdout_df.empty:
+            raise ValueError('Holdout split is empty')
 
-    unseen_holdout = sorted(set(holdout_df[TARGET_COL]) - set(train_df[TARGET_COL]))
-    if unseen_holdout:
-        unseen_text = ', '.join(unseen_holdout)
-        raise ValueError(f'Holdout split has unseen target labels: {unseen_text}')
+        validate_unseen_single_label(train_df[TARGET_COL], valid_df[TARGET_COL], 'Validation split')
+        validate_unseen_single_label(train_df[TARGET_COL], holdout_df[TARGET_COL], 'Holdout split')
 
-    split_df = pd.DataFrame(
-        [
+        split_rows = [
             {
-                'split': 'train',
+                'split': policy['train_name'],
                 'rows': int(len(train_df)),
                 'cases': int(train_df[ID_COL].nunique()),
                 'date_min': train_df[DATE_COL].min(),
@@ -372,7 +539,7 @@ def split_single_label_cases(df):
                 'target_groups': int(train_df[TARGET_COL].nunique())
             },
             {
-                'split': 'valid_2025',
+                'split': policy['valid_name'],
                 'rows': int(len(valid_df)),
                 'cases': int(valid_df[ID_COL].nunique()),
                 'date_min': valid_df[DATE_COL].min(),
@@ -380,7 +547,7 @@ def split_single_label_cases(df):
                 'target_groups': int(valid_df[TARGET_COL].nunique())
             },
             {
-                'split': 'holdout_2026',
+                'split': policy['holdout_name'],
                 'rows': int(len(holdout_df)),
                 'cases': int(holdout_df[ID_COL].nunique()),
                 'date_min': holdout_df[DATE_COL].min(),
@@ -388,48 +555,200 @@ def split_single_label_cases(df):
                 'target_groups': int(holdout_df[TARGET_COL].nunique())
             }
         ]
-    )
-    return train_df, valid_df, holdout_df, split_df
+        return {
+            policy['train_name']: train_df,
+            policy['valid_name']: valid_df,
+            policy['holdout_name']: holdout_df,
+            'split_df': pd.DataFrame(split_rows)
+        }
 
-
-def split_multi_label_cases(df):
-    train_df = df.loc[df[DATE_COL] <= TRAIN_END].copy()
-    valid_df = df.loc[(df[DATE_COL] > TRAIN_END) & (df[DATE_COL] <= VALID_END)].copy()
-    holdout_df = df.loc[df[DATE_COL] > VALID_END].copy()
+    train_df = df.loc[df[DATE_COL] <= policy['train_core_end']].copy()
+    screen_df = df.loc[(df[DATE_COL] > policy['train_core_end']) & (df[DATE_COL] <= policy['screen_end'])].copy()
+    select_df = df.loc[(df[DATE_COL] > policy['screen_end']) & (df[DATE_COL] <= policy['select_end'])].copy()
+    holdout_df = df.loc[df[DATE_COL] > policy['select_end']].copy()
 
     if train_df.empty:
         raise ValueError('Training split is empty')
-    if valid_df.empty:
-        raise ValueError('Validation split is empty')
+    if screen_df.empty:
+        raise ValueError('Screen split is empty')
+    if select_df.empty:
+        raise ValueError('Select split is empty')
     if holdout_df.empty:
         raise ValueError('Holdout split is empty')
 
-    split_df = pd.DataFrame(
-        [
+    dev_screen_df = pd.concat([train_df, screen_df], ignore_index=True).sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
+    dev_select_df = pd.concat([dev_screen_df, select_df], ignore_index=True).sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
+    validate_unseen_single_label(train_df[TARGET_COL], screen_df[TARGET_COL], 'Screen split')
+    validate_unseen_single_label(dev_screen_df[TARGET_COL], select_df[TARGET_COL], 'Select split')
+    validate_unseen_single_label(dev_select_df[TARGET_COL], holdout_df[TARGET_COL], 'Holdout split')
+
+    split_rows = [
+        {
+            'split': policy['train_name'],
+            'rows': int(len(train_df)),
+            'cases': int(train_df[ID_COL].nunique()),
+            'date_min': train_df[DATE_COL].min(),
+            'date_max': train_df[DATE_COL].max(),
+            'target_groups': int(train_df[TARGET_COL].nunique())
+        },
+        {
+            'split': policy['screen_name'],
+            'rows': int(len(screen_df)),
+            'cases': int(screen_df[ID_COL].nunique()),
+            'date_min': screen_df[DATE_COL].min(),
+            'date_max': screen_df[DATE_COL].max(),
+            'target_groups': int(screen_df[TARGET_COL].nunique())
+        },
+        {
+            'split': policy['select_name'],
+            'rows': int(len(select_df)),
+            'cases': int(select_df[ID_COL].nunique()),
+            'date_min': select_df[DATE_COL].min(),
+            'date_max': select_df[DATE_COL].max(),
+            'target_groups': int(select_df[TARGET_COL].nunique())
+        },
+        {
+            'split': policy['holdout_name'],
+            'rows': int(len(holdout_df)),
+            'cases': int(holdout_df[ID_COL].nunique()),
+            'date_min': holdout_df[DATE_COL].min(),
+            'date_max': holdout_df[DATE_COL].max(),
+            'target_groups': int(holdout_df[TARGET_COL].nunique())
+        }
+    ]
+    return {
+        policy['train_name']: train_df,
+        policy['screen_name']: screen_df,
+        policy['select_name']: select_df,
+        policy['holdout_name']: holdout_df,
+        policy['select_train_name']: dev_screen_df,
+        policy['dev_name']: dev_select_df,
+        'split_df': pd.DataFrame(split_rows)
+    }
+
+
+def split_single_label_cases(df):
+    split_parts = split_single_label_cases_by_mode(df, split_mode=BENCHMARK_SPLIT_MODE)
+    policy = get_split_policy(BENCHMARK_SPLIT_MODE)
+    return (
+        split_parts[policy['train_name']],
+        split_parts[policy['valid_name']],
+        split_parts[policy['holdout_name']],
+        split_parts['split_df']
+    )
+
+
+def split_multi_label_cases_by_mode(df, split_mode=BENCHMARK_SPLIT_MODE):
+    policy = get_split_policy(split_mode)
+
+    if split_mode == BENCHMARK_SPLIT_MODE:
+        train_df = df.loc[df[DATE_COL] <= policy['train_end']].copy()
+        valid_df = df.loc[(df[DATE_COL] > policy['train_end']) & (df[DATE_COL] <= policy['valid_end'])].copy()
+        holdout_df = df.loc[df[DATE_COL] > policy['valid_end']].copy()
+
+        if train_df.empty:
+            raise ValueError('Training split is empty')
+        if valid_df.empty:
+            raise ValueError('Validation split is empty')
+        if holdout_df.empty:
+            raise ValueError('Holdout split is empty')
+
+        split_rows = [
             {
-                'split': 'train',
+                'split': policy['train_name'],
                 'rows': int(len(train_df)),
                 'cases': int(train_df[ID_COL].nunique()),
                 'date_min': train_df[DATE_COL].min(),
                 'date_max': train_df[DATE_COL].max()
             },
             {
-                'split': 'valid_2025',
+                'split': policy['valid_name'],
                 'rows': int(len(valid_df)),
                 'cases': int(valid_df[ID_COL].nunique()),
                 'date_min': valid_df[DATE_COL].min(),
                 'date_max': valid_df[DATE_COL].max()
             },
             {
-                'split': 'holdout_2026',
+                'split': policy['holdout_name'],
                 'rows': int(len(holdout_df)),
                 'cases': int(holdout_df[ID_COL].nunique()),
                 'date_min': holdout_df[DATE_COL].min(),
                 'date_max': holdout_df[DATE_COL].max()
             }
         ]
+        return {
+            policy['train_name']: train_df,
+            policy['valid_name']: valid_df,
+            policy['holdout_name']: holdout_df,
+            'split_df': pd.DataFrame(split_rows)
+        }
+
+    train_df = df.loc[df[DATE_COL] <= policy['train_core_end']].copy()
+    screen_df = df.loc[(df[DATE_COL] > policy['train_core_end']) & (df[DATE_COL] <= policy['screen_end'])].copy()
+    select_df = df.loc[(df[DATE_COL] > policy['screen_end']) & (df[DATE_COL] <= policy['select_end'])].copy()
+    holdout_df = df.loc[df[DATE_COL] > policy['select_end']].copy()
+
+    if train_df.empty:
+        raise ValueError('Training split is empty')
+    if screen_df.empty:
+        raise ValueError('Screen split is empty')
+    if select_df.empty:
+        raise ValueError('Select split is empty')
+    if holdout_df.empty:
+        raise ValueError('Holdout split is empty')
+
+    dev_screen_df = pd.concat([train_df, screen_df], ignore_index=True).sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
+    dev_select_df = pd.concat([dev_screen_df, select_df], ignore_index=True).sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
+    split_rows = [
+        {
+            'split': policy['train_name'],
+            'rows': int(len(train_df)),
+            'cases': int(train_df[ID_COL].nunique()),
+            'date_min': train_df[DATE_COL].min(),
+            'date_max': train_df[DATE_COL].max()
+        },
+        {
+            'split': policy['screen_name'],
+            'rows': int(len(screen_df)),
+            'cases': int(screen_df[ID_COL].nunique()),
+            'date_min': screen_df[DATE_COL].min(),
+            'date_max': screen_df[DATE_COL].max()
+        },
+        {
+            'split': policy['select_name'],
+            'rows': int(len(select_df)),
+            'cases': int(select_df[ID_COL].nunique()),
+            'date_min': select_df[DATE_COL].min(),
+            'date_max': select_df[DATE_COL].max()
+        },
+        {
+            'split': policy['holdout_name'],
+            'rows': int(len(holdout_df)),
+            'cases': int(holdout_df[ID_COL].nunique()),
+            'date_min': holdout_df[DATE_COL].min(),
+            'date_max': holdout_df[DATE_COL].max()
+        }
+    ]
+    return {
+        policy['train_name']: train_df,
+        policy['screen_name']: screen_df,
+        policy['select_name']: select_df,
+        policy['holdout_name']: holdout_df,
+        policy['select_train_name']: dev_screen_df,
+        policy['dev_name']: dev_select_df,
+        'split_df': pd.DataFrame(split_rows)
+    }
+
+
+def split_multi_label_cases(df):
+    split_parts = split_multi_label_cases_by_mode(df, split_mode=BENCHMARK_SPLIT_MODE)
+    policy = get_split_policy(BENCHMARK_SPLIT_MODE)
+    return (
+        split_parts[policy['train_name']],
+        split_parts[policy['valid_name']],
+        split_parts[policy['holdout_name']],
+        split_parts['split_df']
     )
-    return train_df, valid_df, holdout_df, split_df
 
 
 # -----------------------------------------------------------------------------

@@ -2,10 +2,13 @@ import pandas as pd
 import pytest
 
 from src.modeling.component_common import (
+    FEATURE_WAVE1_SPLIT_MODE,
     apply_multilabel_threshold,
+    compose_feature_manifest,
     feature_manifest,
     prep_single_label_cases,
     split_single_label_cases,
+    split_single_label_cases_by_mode,
 )
 
 
@@ -79,3 +82,49 @@ def test_apply_multilabel_threshold_enforces_top1_fallback():
         [1, 0, 0],
         [1, 0, 0]
     ]
+
+
+def test_compose_feature_manifest_tracks_added_and_removed_columns():
+    feature_info = compose_feature_manifest(
+        'wave1_test_family',
+        add_cols=['state_region', 'vehicle_age_bucket'],
+        remove_cols=['fire']
+    )
+
+    assert feature_info['feature_set_name'] == 'wave1_test_family'
+    assert feature_info['added_cols'] == ['state_region', 'vehicle_age_bucket']
+    assert feature_info['removed_cols'] == ['fire']
+    assert 'state_region' in feature_info['feature_cols']
+    assert 'vehicle_age_bucket' in feature_info['feature_cols']
+    assert 'fire' not in feature_info['feature_cols']
+
+
+def test_split_single_label_cases_by_mode_builds_feature_wave_frames():
+    feature_info = compose_feature_manifest(
+        'wave1_geo_family',
+        add_cols=['complaint_year', 'complaint_month', 'complaint_quarter', 'vehicle_age_years', 'vehicle_age_bucket', 'state_region']
+    )
+    df = pd.DataFrame(
+        [
+            build_case_row(1, 'ENGINE / COOLING', '2023-01-01'),
+            build_case_row(2, 'ENGINE / COOLING', '2024-01-01'),
+            build_case_row(3, 'ENGINE / COOLING', '2025-01-01'),
+            build_case_row(4, 'ENGINE / COOLING', '2026-01-01')
+        ]
+    )
+    df['complaint_year'] = [2023, 2024, 2025, 2026]
+    df['complaint_month'] = [1, 1, 1, 1]
+    df['complaint_quarter'] = [1, 1, 1, 1]
+    df['vehicle_age_years'] = [3, 4, 5, 6]
+    df['vehicle_age_bucket'] = ['AGE_1_3', 'AGE_4_7', 'AGE_4_7', 'AGE_4_7']
+    df['state_region'] = ['SOUTH', 'SOUTH', 'SOUTH', 'SOUTH']
+
+    prepared = prep_single_label_cases(df, feature_info['feature_cols'])
+    split_parts = split_single_label_cases_by_mode(prepared, split_mode=FEATURE_WAVE1_SPLIT_MODE)
+
+    assert len(split_parts['train_core']) == 1
+    assert len(split_parts['screen_2024']) == 1
+    assert len(split_parts['select_2025']) == 1
+    assert len(split_parts['holdout_2026']) == 1
+    assert len(split_parts['dev_2020_2024']) == 2
+    assert len(split_parts['dev_2020_2025']) == 3
