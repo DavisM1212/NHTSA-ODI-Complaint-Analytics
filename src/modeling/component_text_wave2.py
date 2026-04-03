@@ -344,6 +344,71 @@ def empty_multi_label_df():
     )
 
 
+def write_single_outputs(result):
+    result.get('screen_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / SINGLE_SCREEN_NAME, index=False)
+    result.get('select_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / SINGLE_SELECT_NAME, index=False)
+    result.get('holdout_df', empty_single_holdout_df()).to_csv(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME, index=False)
+    result.get('class_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / SINGLE_CLASS_NAME, index=False)
+    result.get('confusion_df', empty_single_confusion_df()).to_csv(OUTPUTS_DIR / SINGLE_CONFUSION_NAME, index=False)
+    result.get('calibration_df', empty_single_calibration_df()).to_csv(OUTPUTS_DIR / SINGLE_CALIB_NAME, index=False)
+
+
+def write_multi_outputs(result):
+    result.get('screen_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / MULTI_SCREEN_NAME, index=False)
+    result.get('select_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / MULTI_SELECT_NAME, index=False)
+    result.get('holdout_df', empty_multi_holdout_df()).to_csv(OUTPUTS_DIR / MULTI_HOLDOUT_NAME, index=False)
+    result.get('label_df', empty_multi_label_df()).to_csv(OUTPUTS_DIR / MULTI_LABEL_NAME, index=False)
+
+
+def build_single_manifest_entry(result, locked_select_baseline, locked_holdout_baseline, locked_holdout_ece):
+    return {
+        'input_path': result.get('input_path'),
+        'text_sidecar_path': result.get('text_sidecar_path'),
+        'selected_family': result.get('selected_family'),
+        'screen_fusion_weight': result.get('screen_fusion_weight'),
+        'select_metrics': result.get('select_metrics'),
+        'locked_select_baseline': locked_select_baseline,
+        'locked_holdout_baseline': locked_holdout_baseline,
+        'locked_holdout_ece': locked_holdout_ece,
+        'select_gate_pass': result.get('select_gate_pass'),
+        'promotion_status': result.get('promotion_status'),
+        'holdout_overlap_slices': result.get('overlap_metrics', []),
+        'checkpoint_stage': result.get('checkpoint_stage'),
+        'completed_stages': result.get('completed_stages', []),
+        'artifacts': {
+            'screen': str(OUTPUTS_DIR / SINGLE_SCREEN_NAME),
+            'select': str(OUTPUTS_DIR / SINGLE_SELECT_NAME),
+            'holdout': str(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME),
+            'class_metrics': str(OUTPUTS_DIR / SINGLE_CLASS_NAME),
+            'confusion_major': str(OUTPUTS_DIR / SINGLE_CONFUSION_NAME),
+            'calibration': str(OUTPUTS_DIR / SINGLE_CALIB_NAME)
+        }
+    }
+
+
+def build_multi_manifest_entry(result, locked_select_baseline, locked_holdout_baseline):
+    return {
+        'input_path': result.get('input_path'),
+        'text_sidecar_path': result.get('text_sidecar_path'),
+        'selected_family': result.get('selected_family'),
+        'screen_fusion_weight': result.get('screen_fusion_weight'),
+        'select_metrics': result.get('select_metrics'),
+        'locked_select_baseline': locked_select_baseline,
+        'locked_holdout_baseline': locked_holdout_baseline,
+        'select_gate_pass': result.get('select_gate_pass'),
+        'promotion_status': result.get('promotion_status'),
+        'holdout_overlap_slices': result.get('overlap_metrics', []),
+        'checkpoint_stage': result.get('checkpoint_stage'),
+        'completed_stages': result.get('completed_stages', []),
+        'artifacts': {
+            'screen': str(OUTPUTS_DIR / MULTI_SCREEN_NAME),
+            'select': str(OUTPUTS_DIR / MULTI_SELECT_NAME),
+            'holdout': str(OUTPUTS_DIR / MULTI_HOLDOUT_NAME),
+            'label_metrics': str(OUTPUTS_DIR / MULTI_LABEL_NAME)
+        }
+    }
+
+
 def prepare_text_sidecar(sidecar_df):
     missing = [column for column in TEXT_SIDECAR_COLS if column not in sidecar_df.columns]
     if missing:
@@ -558,7 +623,7 @@ def fit_single_linear(train_matrix, y_train, eval_matrix, final_model=False):
     start = perf_counter()
     model.fit(train_matrix, y_train)
     fit_seconds = round(perf_counter() - start, 2)
-    eval_proba = model.predict_proba(eval_matrix)
+    eval_proba = safe_single_predict_proba(model, eval_matrix)
     return {
         'model': model,
         'fit_seconds': fit_seconds,
@@ -572,12 +637,69 @@ def fit_multi_linear(train_matrix, y_train, eval_matrix, final_model=False):
     start = perf_counter()
     model.fit(train_matrix, y_train)
     fit_seconds = round(perf_counter() - start, 2)
-    eval_proba = model.predict_proba(eval_matrix)
+    eval_proba = safe_multi_predict_proba(model, eval_matrix)
     return {
         'model': model,
         'fit_seconds': fit_seconds,
         'eval_proba': eval_proba
     }
+
+
+def stable_softmax(decision):
+    decision = np.asarray(decision, dtype=np.float64)
+    decision = np.nan_to_num(decision, nan=0.0, posinf=1e6, neginf=-1e6)
+    decision = decision - decision.max(axis=1, keepdims=True)
+    exp_scores = np.exp(np.clip(decision, -700, 700))
+    row_sums = exp_scores.sum(axis=1, keepdims=True)
+    zero_rows = row_sums.squeeze(axis=1) <= 0
+    if np.any(zero_rows):
+        exp_scores[zero_rows] = 1.0
+        row_sums = exp_scores.sum(axis=1, keepdims=True)
+    return exp_scores / row_sums
+
+
+def stable_sigmoid(decision):
+    decision = np.asarray(decision, dtype=np.float64)
+    decision = np.nan_to_num(decision, nan=0.0, posinf=1e6, neginf=-1e6)
+    return 1.0 / (1.0 + np.exp(-np.clip(decision, -700, 700)))
+
+
+def ensure_finite_matrix(name, matrix):
+    matrix = np.asarray(matrix, dtype=np.float64)
+    if not np.isfinite(matrix).all():
+        raise ValueError(f'{name} contains non-finite values after stabilization')
+    return matrix
+
+
+def safe_single_predict_proba(model, matrix):
+    try:
+        proba = model.predict_proba(matrix)
+        if np.isfinite(proba).all():
+            return np.asarray(proba, dtype=np.float64)
+    except Exception:
+        pass
+
+    decision = model.decision_function(matrix)
+    decision = np.asarray(decision)
+    if decision.ndim == 1:
+        positive = stable_sigmoid(decision)
+        proba = np.column_stack([1.0 - positive, positive])
+    else:
+        proba = stable_softmax(decision)
+    return ensure_finite_matrix('single-label probabilities', proba)
+
+
+def safe_multi_predict_proba(model, matrix):
+    try:
+        proba = model.predict_proba(matrix)
+        if np.isfinite(proba).all():
+            return np.asarray(proba, dtype=np.float64)
+    except Exception:
+        pass
+
+    decision = model.decision_function(matrix)
+    proba = stable_sigmoid(decision)
+    return ensure_finite_matrix('multi-label probabilities', proba)
 
 
 def align_single_proba(proba, source_classes, target_classes):
@@ -1028,7 +1150,7 @@ def log_multi_family(stage_name, family_name, row):
 # -----------------------------------------------------------------------------
 # Single-label wave
 # -----------------------------------------------------------------------------
-def run_single_wave(args, structured_feature_info, locked_single_select_row, locked_single_manifest, locked_single_ece, locked_single_selection):
+def run_single_wave(args, structured_feature_info, locked_single_select_row, locked_single_manifest, locked_single_ece, locked_single_selection, checkpoint_fn=None):
     screen_rows = []
     select_rows = []
     holdout_rows = []
@@ -1036,6 +1158,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     confusion_df = empty_single_confusion_df()
     calibration_df = empty_single_calibration_df()
     overlap_metrics = []
+    completed_stages = []
 
     raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.single_input_path)
     sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
@@ -1055,6 +1178,32 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         f'[single] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
         f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,}'
     )
+
+    def emit_checkpoint(checkpoint_stage, selected_family=None, select_metrics=None, select_gate_pass=None, promotion_status='running'):
+        if checkpoint_fn is None:
+            return
+        checkpoint_fn(
+            checkpoint_stage,
+            {
+                'input_path': str(input_path),
+                'text_sidecar_path': str(text_sidecar_path),
+                'split_df': split_parts['split_df'],
+                'screen_df': pd.DataFrame(screen_rows),
+                'select_df': pd.DataFrame(select_rows),
+                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_single_holdout_df(),
+                'class_df': class_df,
+                'confusion_df': confusion_df,
+                'calibration_df': calibration_df,
+                'selected_family': selected_family,
+                'screen_fusion_weight': late_screen['selected_text_weight'] if 'late_screen' in locals() else None,
+                'select_metrics': select_metrics,
+                'select_gate_pass': select_gate_pass,
+                'promotion_status': promotion_status,
+                'overlap_metrics': overlap_metrics,
+                'checkpoint_stage': checkpoint_stage,
+                'completed_stages': list(completed_stages)
+            }
+        )
 
     structured_screen = fit_single_structured_family(
         train_core_df,
@@ -1148,6 +1297,8 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     )
     screen_rows.append(late_screen_row)
     log_single_family('screen_2024', LATE_FUSION_FAMILY, late_screen_row)
+    completed_stages.append('screen_2024')
+    emit_checkpoint('screen_2024_complete')
 
     structured_select = fit_single_structured_family(
         dev_screen_df,
@@ -1252,6 +1403,14 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     select_improvement = float(current_best_row['macro_f1'] - locked_single_select_row['macro_f1'])
     select_gate_pass = select_improvement >= SINGLE_PROMOTE_SELECT_DELTA
     promotion_status = 'rejected_select'
+    completed_stages.append('select_2025')
+    emit_checkpoint(
+        'select_2025_complete',
+        selected_family=selected_family,
+        select_metrics=current_best_row,
+        select_gate_pass=select_gate_pass,
+        promotion_status='running'
+    )
 
     if select_gate_pass:
         if selected_family == STRUCTURED_FAMILY:
@@ -1427,6 +1586,22 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             and holdout_top3_ok
             and holdout_ece_ok
         ) else 'rejected_holdout'
+        completed_stages.append('holdout_2026')
+        emit_checkpoint(
+            'holdout_2026_complete',
+            selected_family=selected_family,
+            select_metrics=current_best_row,
+            select_gate_pass=select_gate_pass,
+            promotion_status=promotion_status
+        )
+    else:
+        emit_checkpoint(
+            'select_gate_rejected',
+            selected_family=selected_family,
+            select_metrics=current_best_row,
+            select_gate_pass=select_gate_pass,
+            promotion_status=promotion_status
+        )
 
     return {
         'input_path': str(input_path),
@@ -1443,19 +1618,22 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         'select_metrics': current_best_row,
         'select_gate_pass': select_gate_pass,
         'promotion_status': promotion_status,
-        'overlap_metrics': overlap_metrics
+        'overlap_metrics': overlap_metrics,
+        'checkpoint_stage': 'completed',
+        'completed_stages': list(completed_stages)
     }
 
 
 # -----------------------------------------------------------------------------
 # Multi-label wave
 # -----------------------------------------------------------------------------
-def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locked_multi_manifest):
+def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locked_multi_manifest, checkpoint_fn=None):
     screen_rows = []
     select_rows = []
     holdout_rows = []
     label_df = empty_multi_label_df()
     overlap_metrics = []
+    completed_stages = []
 
     raw_df, input_path = load_frame(MULTI_INPUT_STEM, input_path=args.multi_input_path)
     sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
@@ -1474,6 +1652,30 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         f'[multi] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
         f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,}'
     )
+
+    def emit_checkpoint(checkpoint_stage, selected_family=None, select_metrics=None, select_gate_pass=None, promotion_status='running'):
+        if checkpoint_fn is None:
+            return
+        checkpoint_fn(
+            checkpoint_stage,
+            {
+                'input_path': str(input_path),
+                'text_sidecar_path': str(text_sidecar_path),
+                'split_df': split_parts['split_df'],
+                'screen_df': pd.DataFrame(screen_rows),
+                'select_df': pd.DataFrame(select_rows),
+                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_multi_holdout_df(),
+                'label_df': label_df,
+                'selected_family': selected_family,
+                'screen_fusion_weight': late_screen['selected_text_weight'] if 'late_screen' in locals() else None,
+                'select_metrics': select_metrics,
+                'select_gate_pass': select_gate_pass,
+                'promotion_status': promotion_status,
+                'overlap_metrics': overlap_metrics,
+                'checkpoint_stage': checkpoint_stage,
+                'completed_stages': list(completed_stages)
+            }
+        )
 
     structured_screen = fit_multi_structured_family(
         train_core_df,
@@ -1569,6 +1771,8 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     )
     screen_rows.append(late_screen_row)
     log_multi_family('screen_2024', LATE_FUSION_FAMILY, late_screen_row)
+    completed_stages.append('screen_2024')
+    emit_checkpoint('screen_2024_complete')
 
     structured_select = fit_multi_structured_family(
         dev_screen_df,
@@ -1675,6 +1879,14 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     select_improvement = float(current_best_row['macro_f1'] - locked_multi_select_row['macro_f1'])
     select_gate_pass = select_improvement >= MULTI_PROMOTE_SELECT_DELTA
     promotion_status = 'rejected_select'
+    completed_stages.append('select_2025')
+    emit_checkpoint(
+        'select_2025_complete',
+        selected_family=selected_family,
+        select_metrics=current_best_row,
+        select_gate_pass=select_gate_pass,
+        promotion_status='running'
+    )
 
     if select_gate_pass:
         if selected_family == STRUCTURED_FAMILY:
@@ -1845,6 +2057,22 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             and holdout_row['recall_at_3'] >= locked_holdout['recall_at_3']
             and holdout_row['label_coverage'] >= MULTI_LABEL_COVERAGE_FLOOR
         ) else 'rejected_holdout'
+        completed_stages.append('holdout_2026')
+        emit_checkpoint(
+            'holdout_2026_complete',
+            selected_family=selected_family,
+            select_metrics=current_best_row,
+            select_gate_pass=select_gate_pass,
+            promotion_status=promotion_status
+        )
+    else:
+        emit_checkpoint(
+            'select_gate_rejected',
+            selected_family=selected_family,
+            select_metrics=current_best_row,
+            select_gate_pass=select_gate_pass,
+            promotion_status=promotion_status
+        )
 
     return {
         'input_path': str(input_path),
@@ -1859,7 +2087,9 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         'select_metrics': current_best_row,
         'select_gate_pass': select_gate_pass,
         'promotion_status': promotion_status,
-        'overlap_metrics': overlap_metrics
+        'overlap_metrics': overlap_metrics,
+        'checkpoint_stage': 'completed',
+        'completed_stages': list(completed_stages)
     }
 
 
@@ -1914,6 +2144,7 @@ def main():
         'feature_wave': 2,
         'split_mode': FEATURE_WAVE1_SPLIT_MODE,
         'public_benchmark_locked': True,
+        'run_status': 'running',
         'structured_companion_feature_set': STRUCTURED_FEATURE_SET,
         'text_config': TEXT_CONFIG,
         'runtime': runtime_manifest(),
@@ -1921,80 +2152,80 @@ def main():
             'git_head': get_git_head(),
             'git_dirty': get_git_dirty_flag()
         },
+        'last_checkpoint': None,
         'tasks': {}
     }
+    write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
 
-    if not args.skip_single:
-        log_line('[run] Single-label text wave 2')
-        single_result = run_single_wave(
-            args,
-            structured_feature_info,
+    def checkpoint_single(stage_name, result):
+        write_single_outputs(result)
+        manifest['tasks']['single_label'] = build_single_manifest_entry(
+            result,
             locked_single_select_row,
-            locked_single_manifest,
-            locked_single_ece,
-            locked_single_selection
+            locked_single_manifest['official_holdout_metrics'],
+            locked_single_ece
         )
-        single_result['screen_df'].to_csv(OUTPUTS_DIR / SINGLE_SCREEN_NAME, index=False)
-        single_result['select_df'].to_csv(OUTPUTS_DIR / SINGLE_SELECT_NAME, index=False)
-        single_result['holdout_df'].to_csv(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME, index=False)
-        single_result['class_df'].to_csv(OUTPUTS_DIR / SINGLE_CLASS_NAME, index=False)
-        single_result['confusion_df'].to_csv(OUTPUTS_DIR / SINGLE_CONFUSION_NAME, index=False)
-        single_result['calibration_df'].to_csv(OUTPUTS_DIR / SINGLE_CALIB_NAME, index=False)
-
-        manifest['tasks']['single_label'] = {
-            'input_path': single_result['input_path'],
-            'text_sidecar_path': single_result['text_sidecar_path'],
-            'selected_family': single_result['selected_family'],
-            'screen_fusion_weight': single_result['screen_fusion_weight'],
-            'select_metrics': single_result['select_metrics'],
-            'locked_select_baseline': locked_single_select_row,
-            'locked_holdout_baseline': locked_single_manifest['official_holdout_metrics'],
-            'locked_holdout_ece': locked_single_ece,
-            'select_gate_pass': single_result['select_gate_pass'],
-            'promotion_status': single_result['promotion_status'],
-            'holdout_overlap_slices': single_result['overlap_metrics'],
-            'artifacts': {
-                'screen': str(OUTPUTS_DIR / SINGLE_SCREEN_NAME),
-                'select': str(OUTPUTS_DIR / SINGLE_SELECT_NAME),
-                'holdout': str(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME),
-                'class_metrics': str(OUTPUTS_DIR / SINGLE_CLASS_NAME),
-                'confusion_major': str(OUTPUTS_DIR / SINGLE_CONFUSION_NAME),
-                'calibration': str(OUTPUTS_DIR / SINGLE_CALIB_NAME)
-            }
+        manifest['last_checkpoint'] = {
+            'task': 'single_label',
+            'stage': stage_name
         }
+        write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
 
-    if not args.skip_multi:
-        log_line('[run] Multi-label text wave 2')
-        multi_result = run_multi_wave(
-            args,
-            structured_feature_info,
+    def checkpoint_multi(stage_name, result):
+        write_multi_outputs(result)
+        manifest['tasks']['multi_label'] = build_multi_manifest_entry(
+            result,
             locked_multi_select_row,
-            locked_multi_manifest
+            locked_multi_manifest['official_holdout_metrics']
         )
-        multi_result['screen_df'].to_csv(OUTPUTS_DIR / MULTI_SCREEN_NAME, index=False)
-        multi_result['select_df'].to_csv(OUTPUTS_DIR / MULTI_SELECT_NAME, index=False)
-        multi_result['holdout_df'].to_csv(OUTPUTS_DIR / MULTI_HOLDOUT_NAME, index=False)
-        multi_result['label_df'].to_csv(OUTPUTS_DIR / MULTI_LABEL_NAME, index=False)
-
-        manifest['tasks']['multi_label'] = {
-            'input_path': multi_result['input_path'],
-            'text_sidecar_path': multi_result['text_sidecar_path'],
-            'selected_family': multi_result['selected_family'],
-            'screen_fusion_weight': multi_result['screen_fusion_weight'],
-            'select_metrics': multi_result['select_metrics'],
-            'locked_select_baseline': locked_multi_select_row,
-            'locked_holdout_baseline': locked_multi_manifest['official_holdout_metrics'],
-            'select_gate_pass': multi_result['select_gate_pass'],
-            'promotion_status': multi_result['promotion_status'],
-            'holdout_overlap_slices': multi_result['overlap_metrics'],
-            'artifacts': {
-                'screen': str(OUTPUTS_DIR / MULTI_SCREEN_NAME),
-                'select': str(OUTPUTS_DIR / MULTI_SELECT_NAME),
-                'holdout': str(OUTPUTS_DIR / MULTI_HOLDOUT_NAME),
-                'label_metrics': str(OUTPUTS_DIR / MULTI_LABEL_NAME)
-            }
+        manifest['last_checkpoint'] = {
+            'task': 'multi_label',
+            'stage': stage_name
         }
+        write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
 
+    try:
+        if not args.skip_single:
+            log_line('[run] Single-label text wave 2')
+            single_result = run_single_wave(
+                args,
+                structured_feature_info,
+                locked_single_select_row,
+                locked_single_manifest,
+                locked_single_ece,
+                locked_single_selection,
+                checkpoint_fn=checkpoint_single
+            )
+            write_single_outputs(single_result)
+            manifest['tasks']['single_label'] = build_single_manifest_entry(
+                single_result,
+                locked_single_select_row,
+                locked_single_manifest['official_holdout_metrics'],
+                locked_single_ece
+            )
+
+        if not args.skip_multi:
+            log_line('[run] Multi-label text wave 2')
+            multi_result = run_multi_wave(
+                args,
+                structured_feature_info,
+                locked_multi_select_row,
+                locked_multi_manifest,
+                checkpoint_fn=checkpoint_multi
+            )
+            write_multi_outputs(multi_result)
+            manifest['tasks']['multi_label'] = build_multi_manifest_entry(
+                multi_result,
+                locked_multi_select_row,
+                locked_multi_manifest['official_holdout_metrics']
+            )
+    except Exception as exc:
+        manifest['run_status'] = 'failed'
+        manifest['error'] = str(exc)
+        write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+        raise
+
+    manifest['run_status'] = 'completed'
     write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
     print(f'[write] {OUTPUTS_DIR / GLOBAL_MANIFEST_NAME}')
     print('[done] Component text wave 2 finished')

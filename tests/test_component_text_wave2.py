@@ -5,10 +5,14 @@ from src.modeling.component_text_wave2 import (
     FUSION_TEXT_WEIGHTS,
     MULTI_THRESHOLDS,
     STRUCTURED_FEATURE_SET,
+    build_multi_manifest_entry,
+    build_single_manifest_entry,
     build_overlap_mask,
     fit_text_vectorizers,
     merge_text_sidecar,
     prepare_text_sidecar,
+    safe_multi_predict_proba,
+    safe_single_predict_proba,
     select_multi_fusion_weight,
     select_single_fusion_weight,
 )
@@ -141,3 +145,64 @@ def test_build_overlap_mask_uses_exact_nonempty_matches():
     )
 
     assert mask.tolist() == [True, False, False]
+
+
+def test_checkpoint_manifest_entries_include_stage_metadata():
+    single_entry = build_single_manifest_entry(
+        {
+            'input_path': 'single.parquet',
+            'text_sidecar_path': 'sidecar.parquet',
+            'selected_family': 'text_only_linear',
+            'checkpoint_stage': 'screen_2024_complete',
+            'completed_stages': ['screen_2024']
+        },
+        {'macro_f1': 0.1},
+        {'macro_f1': 0.2},
+        0.01
+    )
+    multi_entry = build_multi_manifest_entry(
+        {
+            'input_path': 'multi.parquet',
+            'text_sidecar_path': 'sidecar.parquet',
+            'selected_family': 'structured_carry_forward',
+            'checkpoint_stage': 'select_2025_complete',
+            'completed_stages': ['screen_2024', 'select_2025']
+        },
+        {'macro_f1': 0.1},
+        {'macro_f1': 0.2}
+    )
+
+    assert single_entry['checkpoint_stage'] == 'screen_2024_complete'
+    assert single_entry['artifacts']['screen'].endswith('component_single_label_textwave2_screen.csv')
+    assert multi_entry['checkpoint_stage'] == 'select_2025_complete'
+    assert multi_entry['artifacts']['holdout'].endswith('component_multilabel_textwave2_holdout.csv')
+
+
+def test_safe_single_predict_proba_falls_back_to_decision_scores():
+    class DummySingleModel:
+        classes_ = np.array(['A', 'B', 'C'])
+
+        def predict_proba(self, matrix):
+            return np.array([[np.nan, np.nan, np.nan], [np.nan, np.nan, np.nan]])
+
+        def decision_function(self, matrix):
+            return np.array([[10.0, 1.0, -2.0], [0.5, 3.0, 0.0]])
+
+    proba = safe_single_predict_proba(DummySingleModel(), np.zeros((2, 3)))
+
+    assert np.isfinite(proba).all()
+    assert np.allclose(proba.sum(axis=1), 1.0)
+
+
+def test_safe_multi_predict_proba_falls_back_to_decision_scores():
+    class DummyMultiModel:
+        def predict_proba(self, matrix):
+            return np.array([[np.nan, np.nan], [np.nan, np.nan]])
+
+        def decision_function(self, matrix):
+            return np.array([[2.0, -1.0], [0.0, 3.0]])
+
+    proba = safe_multi_predict_proba(DummyMultiModel(), np.zeros((2, 2)))
+
+    assert np.isfinite(proba).all()
+    assert ((proba >= 0.0) & (proba <= 1.0)).all()
