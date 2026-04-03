@@ -1,0 +1,798 @@
+import hashlib
+import json
+import platform
+import subprocess
+import sys
+from pathlib import Path
+from time import perf_counter
+
+import numpy as np
+import pandas as pd
+from catboost import CatBoostClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_recall_fscore_support,
+    top_k_accuracy_score,
+)
+
+from src.config import settings
+from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, PROJECT_ROOT
+
+# -----------------------------------------------------------------------------
+# Core dataset and split definitions
+# -----------------------------------------------------------------------------
+ID_COL = 'odino'
+DATE_COL = 'ldate'
+TARGET_COL = 'component_group'
+MULTI_TARGET_COL = 'component_groups'
+TRAIN_END = pd.Timestamp('2024-12-31')
+VALID_END = pd.Timestamp('2025-12-31')
+TRAIN_VALID_END = VALID_END
+SINGLE_INPUT_STEM = 'odi_component_model_cases'
+MULTI_INPUT_STEM = 'odi_component_multilabel_cases'
+DEFAULT_SELECTION_SEEDS = [42, 43, 44, 45, 46]
+MAX_TOP_K = 3
+
+
+# -----------------------------------------------------------------------------
+# Feature ladder
+# -----------------------------------------------------------------------------
+CAT_FEATURES = [
+    'mfr_name',
+    'maketxt',
+    'modeltxt',
+    'state',
+    'cmpl_type',
+    'drive_train',
+    'fuel_sys',
+    'fuel_type',
+    'trans_type',
+    'fire',
+    'crash',
+    'medical_attn',
+    'vehicles_towed_yn',
+    'police_rpt_yn',
+    'repaired_yn'
+]
+
+NUM_FEATURES = [
+    'yeartxt',
+    'miles',
+    'veh_speed',
+    'injured',
+    'lag_days_safe'
+]
+
+FLAG_FEATURES = [
+    'miles_missing_flag',
+    'veh_speed_missing_flag',
+    'miles_zero_flag',
+    'veh_speed_zero_flag',
+    'faildate_trusted_flag',
+    'flag_date_order_bad',
+    'flag_fail_pre_model',
+    'flag_fail_pre_model_far'
+]
+
+FEATURE_SET_DEFS = {
+    'core_structured': [
+        'mfr_name',
+        'maketxt',
+        'modeltxt',
+        'state',
+        'cmpl_type',
+        'drive_train',
+        'fuel_sys',
+        'fuel_type',
+        'trans_type',
+        'fire',
+        'crash',
+        'medical_attn',
+        'vehicles_towed_yn',
+        'yeartxt',
+        'miles',
+        'veh_speed',
+        'injured',
+        'lag_days_safe',
+        'miles_missing_flag',
+        'veh_speed_missing_flag',
+        'miles_zero_flag',
+        'veh_speed_zero_flag'
+    ],
+    'core_plus_quality': [
+        'mfr_name',
+        'maketxt',
+        'modeltxt',
+        'state',
+        'cmpl_type',
+        'drive_train',
+        'fuel_sys',
+        'fuel_type',
+        'trans_type',
+        'fire',
+        'crash',
+        'medical_attn',
+        'vehicles_towed_yn',
+        'yeartxt',
+        'miles',
+        'veh_speed',
+        'injured',
+        'lag_days_safe',
+        'miles_missing_flag',
+        'veh_speed_missing_flag',
+        'miles_zero_flag',
+        'veh_speed_zero_flag',
+        'faildate_trusted_flag',
+        'flag_date_order_bad',
+        'flag_fail_pre_model',
+        'flag_fail_pre_model_far'
+    ],
+    'core_plus_stable_incident': [
+        'mfr_name',
+        'maketxt',
+        'modeltxt',
+        'state',
+        'cmpl_type',
+        'drive_train',
+        'fuel_sys',
+        'fuel_type',
+        'trans_type',
+        'fire',
+        'crash',
+        'medical_attn',
+        'vehicles_towed_yn',
+        'police_rpt_yn',
+        'repaired_yn',
+        'yeartxt',
+        'miles',
+        'veh_speed',
+        'injured',
+        'lag_days_safe',
+        'miles_missing_flag',
+        'veh_speed_missing_flag',
+        'miles_zero_flag',
+        'veh_speed_zero_flag',
+        'faildate_trusted_flag',
+        'flag_date_order_bad',
+        'flag_fail_pre_model',
+        'flag_fail_pre_model_far'
+    ]
+}
+
+
+# -----------------------------------------------------------------------------
+# Shared file helpers
+# -----------------------------------------------------------------------------
+def resolve_input_path(input_stem, input_path=None):
+    if input_path is not None:
+        path = Path(input_path)
+        if not path.exists():
+            raise FileNotFoundError(f'Input file not found: {path}')
+        return path
+
+    parquet_path = PROCESSED_DATA_DIR / f'{input_stem}.parquet'
+    if parquet_path.exists():
+        return parquet_path
+
+    csv_path = PROCESSED_DATA_DIR / f'{input_stem}.csv'
+    if csv_path.exists():
+        return csv_path
+
+    raise FileNotFoundError(f'No processed file found for {input_stem}')
+
+
+def load_frame(input_stem, input_path=None):
+    path = resolve_input_path(input_stem, input_path=input_path)
+    if path.suffix.lower() == '.parquet':
+        return pd.read_parquet(path), path
+    return pd.read_csv(path, dtype=str, low_memory=False), path
+
+
+def sha256_path(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def get_git_head():
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def get_git_dirty_flag():
+    try:
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return None
+
+
+def runtime_manifest():
+    versions = {}
+    for package_name in ['numpy', 'pandas', 'sklearn', 'catboost', 'optuna']:
+        try:
+            module = __import__(package_name)
+            versions[package_name] = getattr(module, '__version__', None)
+        except Exception:
+            versions[package_name] = None
+
+    return {
+        'python_executable': sys.executable,
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'package_versions': versions,
+        'random_seed_default': settings.RANDOM_SEED
+    }
+
+
+def json_ready(value):
+    if isinstance(value, dict):
+        return {key: json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_ready(item) for item in value]
+    if isinstance(value, tuple):
+        return [json_ready(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, pd.Timedelta):
+        return str(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if pd.isna(value):
+        return None
+    return value
+
+
+def write_json(payload, output_path):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open('w', encoding='utf-8') as handle:
+        json.dump(json_ready(payload), handle, indent=2)
+
+
+# -----------------------------------------------------------------------------
+# Feature helpers
+# -----------------------------------------------------------------------------
+def feature_manifest(feature_set_name):
+    if feature_set_name not in FEATURE_SET_DEFS:
+        choices = ', '.join(sorted(FEATURE_SET_DEFS))
+        raise ValueError(f'Unknown feature set {feature_set_name}. Choices: {choices}')
+
+    feature_cols = list(FEATURE_SET_DEFS[feature_set_name])
+    cat_cols = [column for column in feature_cols if column in CAT_FEATURES]
+    num_cols = [column for column in feature_cols if column in NUM_FEATURES]
+    flag_cols = [column for column in feature_cols if column in FLAG_FEATURES]
+
+    return {
+        'feature_set_name': feature_set_name,
+        'feature_cols': feature_cols,
+        'cat_cols': cat_cols,
+        'num_cols': num_cols,
+        'flag_cols': flag_cols
+    }
+
+
+def require_case_columns(df, feature_cols, target_col=TARGET_COL):
+    required = list(feature_cols) + [ID_COL, DATE_COL, target_col]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        missing_text = ', '.join(missing)
+        raise ValueError(f'Missing required columns: {missing_text}')
+
+
+def prep_single_label_cases(df, feature_cols):
+    require_case_columns(df, feature_cols, target_col=TARGET_COL)
+    work = df.copy()
+    work[DATE_COL] = pd.to_datetime(work[DATE_COL], errors='coerce')
+    if work[DATE_COL].isna().any():
+        missing_dates = int(work[DATE_COL].isna().sum())
+        raise ValueError(f'Found {missing_dates} rows with invalid {DATE_COL} values')
+
+    manifest = feature_manifest(
+        next(name for name, cols in FEATURE_SET_DEFS.items() if list(cols) == list(feature_cols))
+    )
+    for column in manifest['cat_cols']:
+        work[column] = work[column].astype('string').fillna('__MISSING__').astype(str)
+
+    for column in manifest['num_cols'] + manifest['flag_cols']:
+        work[column] = pd.to_numeric(work[column], errors='coerce')
+
+    return work.sort_values([DATE_COL, ID_COL]).reset_index(drop=True)
+
+
+def prep_multi_label_cases(df, feature_cols):
+    require_case_columns(df, feature_cols, target_col=MULTI_TARGET_COL)
+    work = prep_single_label_cases(
+        df.rename(columns={MULTI_TARGET_COL: TARGET_COL}),
+        feature_cols
+    ).rename(columns={TARGET_COL: MULTI_TARGET_COL})
+    work[MULTI_TARGET_COL] = (
+        work[MULTI_TARGET_COL]
+        .astype('string')
+        .fillna('')
+        .astype(str)
+    )
+    return work
+
+
+def split_single_label_cases(df):
+    train_df = df.loc[df[DATE_COL] <= TRAIN_END].copy()
+    valid_df = df.loc[(df[DATE_COL] > TRAIN_END) & (df[DATE_COL] <= VALID_END)].copy()
+    holdout_df = df.loc[df[DATE_COL] > VALID_END].copy()
+
+    if train_df.empty:
+        raise ValueError('Training split is empty')
+    if valid_df.empty:
+        raise ValueError('Validation split is empty')
+    if holdout_df.empty:
+        raise ValueError('Holdout split is empty')
+
+    unseen_valid = sorted(set(valid_df[TARGET_COL]) - set(train_df[TARGET_COL]))
+    if unseen_valid:
+        unseen_text = ', '.join(unseen_valid)
+        raise ValueError(f'Validation split has unseen target labels: {unseen_text}')
+
+    unseen_holdout = sorted(set(holdout_df[TARGET_COL]) - set(train_df[TARGET_COL]))
+    if unseen_holdout:
+        unseen_text = ', '.join(unseen_holdout)
+        raise ValueError(f'Holdout split has unseen target labels: {unseen_text}')
+
+    split_df = pd.DataFrame(
+        [
+            {
+                'split': 'train',
+                'rows': int(len(train_df)),
+                'cases': int(train_df[ID_COL].nunique()),
+                'date_min': train_df[DATE_COL].min(),
+                'date_max': train_df[DATE_COL].max(),
+                'target_groups': int(train_df[TARGET_COL].nunique())
+            },
+            {
+                'split': 'valid_2025',
+                'rows': int(len(valid_df)),
+                'cases': int(valid_df[ID_COL].nunique()),
+                'date_min': valid_df[DATE_COL].min(),
+                'date_max': valid_df[DATE_COL].max(),
+                'target_groups': int(valid_df[TARGET_COL].nunique())
+            },
+            {
+                'split': 'holdout_2026',
+                'rows': int(len(holdout_df)),
+                'cases': int(holdout_df[ID_COL].nunique()),
+                'date_min': holdout_df[DATE_COL].min(),
+                'date_max': holdout_df[DATE_COL].max(),
+                'target_groups': int(holdout_df[TARGET_COL].nunique())
+            }
+        ]
+    )
+    return train_df, valid_df, holdout_df, split_df
+
+
+def split_multi_label_cases(df):
+    train_df = df.loc[df[DATE_COL] <= TRAIN_END].copy()
+    valid_df = df.loc[(df[DATE_COL] > TRAIN_END) & (df[DATE_COL] <= VALID_END)].copy()
+    holdout_df = df.loc[df[DATE_COL] > VALID_END].copy()
+
+    if train_df.empty:
+        raise ValueError('Training split is empty')
+    if valid_df.empty:
+        raise ValueError('Validation split is empty')
+    if holdout_df.empty:
+        raise ValueError('Holdout split is empty')
+
+    split_df = pd.DataFrame(
+        [
+            {
+                'split': 'train',
+                'rows': int(len(train_df)),
+                'cases': int(train_df[ID_COL].nunique()),
+                'date_min': train_df[DATE_COL].min(),
+                'date_max': train_df[DATE_COL].max()
+            },
+            {
+                'split': 'valid_2025',
+                'rows': int(len(valid_df)),
+                'cases': int(valid_df[ID_COL].nunique()),
+                'date_min': valid_df[DATE_COL].min(),
+                'date_max': valid_df[DATE_COL].max()
+            },
+            {
+                'split': 'holdout_2026',
+                'rows': int(len(holdout_df)),
+                'cases': int(holdout_df[ID_COL].nunique()),
+                'date_min': holdout_df[DATE_COL].min(),
+                'date_max': holdout_df[DATE_COL].max()
+            }
+        ]
+    )
+    return train_df, valid_df, holdout_df, split_df
+
+
+# -----------------------------------------------------------------------------
+# Multiclass scoring
+# -----------------------------------------------------------------------------
+def score_multiclass_from_proba(y_true, proba, classes):
+    classes = np.asarray(classes)
+    top_k = min(MAX_TOP_K, len(classes))
+    pred = classes[np.argmax(proba, axis=1)]
+    metrics = {
+        'top_1_accuracy': round(float(accuracy_score(y_true, pred)), 4),
+        'macro_f1': round(float(f1_score(y_true, pred, average='macro')), 4),
+        'top_3_accuracy': round(
+            float(top_k_accuracy_score(y_true, proba, labels=classes, k=top_k)),
+            4
+        )
+    }
+    return pred, metrics
+
+
+def build_multiclass_metric_row(model_name, stage_name, split_name, y_true, proba, classes, fit_seconds=pd.NA, selected_iteration=pd.NA):
+    _, metrics = score_multiclass_from_proba(y_true, proba, classes)
+    return {
+        'model': model_name,
+        'stage': stage_name,
+        'split': split_name,
+        'rows': int(len(y_true)),
+        'fit_seconds': fit_seconds,
+        'selected_iteration': selected_iteration,
+        **metrics
+    }
+
+
+def build_multiclass_class_df(y_true, pred, classes):
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_true,
+        pred,
+        labels=classes,
+        zero_division=0
+    )
+    return pd.DataFrame(
+        {
+            'component_group': classes,
+            'support': support,
+            'precision': np.round(precision, 4),
+            'recall': np.round(recall, 4),
+            'f1': np.round(f1, 4)
+        }
+    ).sort_values(['support', 'f1'], ascending=[False, False]).reset_index(drop=True)
+
+
+def build_multiclass_confusion_df(y_true, pred, focus_groups):
+    counts = pd.crosstab(
+        pd.Categorical(y_true, categories=focus_groups),
+        pd.Categorical(pred, categories=focus_groups),
+        dropna=False
+    )
+    shares = counts.div(counts.sum(axis=1).replace(0, np.nan), axis=0)
+
+    rows = []
+    for true_group in counts.index:
+        for pred_group in counts.columns:
+            rows.append(
+                {
+                    'true_group': true_group,
+                    'pred_group': pred_group,
+                    'count': int(counts.loc[true_group, pred_group]),
+                    'row_share': round(float(shares.loc[true_group, pred_group]), 4)
+                    if not pd.isna(shares.loc[true_group, pred_group])
+                    else np.nan
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def build_multiclass_calibration_df(y_true, proba, classes, bins=10):
+    classes = np.asarray(classes)
+    pred_idx = np.argmax(proba, axis=1)
+    pred = classes[pred_idx]
+    confidence = proba[np.arange(len(proba)), pred_idx]
+    correct = pred == np.asarray(y_true)
+    top_series = pd.DataFrame(
+        {
+            'confidence': confidence,
+            'correct': correct
+        }
+    )
+
+    bin_edges = np.linspace(0.0, 1.0, bins + 1)
+    top_series['bin'] = pd.cut(
+        top_series['confidence'],
+        bins=bin_edges,
+        include_lowest=True
+    )
+    bin_df = (
+        top_series.groupby('bin', observed=False)
+        .agg(
+            count=('confidence', 'size'),
+            accuracy=('correct', 'mean'),
+            avg_confidence=('confidence', 'mean')
+        )
+        .reset_index()
+    )
+    bin_df['share'] = bin_df['count'] / max(len(top_series), 1)
+    bin_df['gap'] = (bin_df['accuracy'] - bin_df['avg_confidence']).abs()
+    ece = float((bin_df['share'] * bin_df['gap']).sum())
+
+    truth_idx = pd.Categorical(y_true, categories=classes).codes
+    one_hot = np.zeros_like(proba)
+    valid_mask = truth_idx >= 0
+    one_hot[np.arange(len(proba))[valid_mask], truth_idx[valid_mask]] = 1.0
+    brier = float(np.mean(np.sum((proba - one_hot) ** 2, axis=1)))
+
+    overall_row = pd.DataFrame(
+        [
+            {
+                'section': 'overall',
+                'bin': 'overall',
+                'count': int(len(top_series)),
+                'share': 1.0,
+                'accuracy': round(float(correct.mean()), 4),
+                'avg_confidence': round(float(confidence.mean()), 4),
+                'gap': round(float(abs(correct.mean() - confidence.mean())), 4),
+                'ece': round(ece, 4),
+                'multiclass_brier': round(brier, 6)
+            }
+        ]
+    )
+
+    bin_df = bin_df.assign(
+        section='bin',
+        ece=np.nan,
+        multiclass_brier=np.nan
+    )
+    bin_df['accuracy'] = bin_df['accuracy'].round(4)
+    bin_df['avg_confidence'] = bin_df['avg_confidence'].round(4)
+    bin_df['share'] = bin_df['share'].round(4)
+    bin_df['gap'] = bin_df['gap'].round(4)
+    bin_df['bin'] = bin_df['bin'].astype(str)
+
+    return pd.concat(
+        [overall_row, bin_df[['section', 'bin', 'count', 'share', 'accuracy', 'avg_confidence', 'gap', 'ece', 'multiclass_brier']]],
+        ignore_index=True
+    )
+
+
+# -----------------------------------------------------------------------------
+# CatBoost helpers
+# -----------------------------------------------------------------------------
+def build_catboost_model(params, task_type='CPU', devices='0', random_seed=None, verbose=0):
+    task_type = str(task_type).upper().strip()
+    if task_type not in {'CPU', 'GPU'}:
+        raise ValueError("task_type must be either 'CPU' or 'GPU'")
+
+    model_params = {
+        'loss_function': 'MultiClass',
+        'eval_metric': 'TotalF1:average=Macro',
+        'custom_metric': ['Accuracy', 'MultiClass'],
+        'auto_class_weights': 'Balanced',
+        'has_time': True,
+        'grow_policy': 'SymmetricTree',
+        'random_seed': settings.RANDOM_SEED if random_seed is None else int(random_seed),
+        'allow_writing_files': False,
+        'task_type': task_type,
+        'verbose': int(verbose)
+    }
+    model_params.update(params)
+
+    if task_type == 'GPU':
+        model_params['devices'] = str(devices)
+
+    return CatBoostClassifier(**model_params)
+
+
+def prep_catboost_frames(train_df, eval_df, feature_info):
+    X_train = train_df[feature_info['feature_cols']].copy()
+    X_eval = eval_df[feature_info['feature_cols']].copy()
+
+    for column in feature_info['cat_cols']:
+        X_train[column] = X_train[column].astype('string').fillna('__MISSING__').astype(str)
+        X_eval[column] = X_eval[column].astype('string').fillna('__MISSING__').astype(str)
+
+    for column in feature_info['num_cols'] + feature_info['flag_cols']:
+        X_train[column] = pd.to_numeric(X_train[column], errors='coerce')
+        X_eval[column] = pd.to_numeric(X_eval[column], errors='coerce')
+
+    return X_train, X_eval
+
+
+def pick_best_iteration(model, X_valid, y_valid, eval_period=1):
+    best = None
+    classes = model.classes_
+    eval_period = max(int(eval_period), 1)
+
+    for iteration_idx, proba in enumerate(
+        model.staged_predict_proba(X_valid, eval_period=eval_period),
+        start=1
+    ):
+        current_iteration = min(iteration_idx * eval_period, int(model.tree_count_))
+        _, metrics = score_multiclass_from_proba(y_valid, proba, classes)
+        candidate = {
+            'selected_iteration': current_iteration,
+            **metrics
+        }
+
+        if best is None:
+            best = candidate
+            continue
+
+        ranking = (
+            candidate['macro_f1'],
+            candidate['top_1_accuracy'],
+            candidate['top_3_accuracy'],
+            -candidate['selected_iteration']
+        )
+        best_ranking = (
+            best['macro_f1'],
+            best['top_1_accuracy'],
+            best['top_3_accuracy'],
+            -best['selected_iteration']
+        )
+        if ranking > best_ranking:
+            best = candidate
+
+    if best is None:
+        raise ValueError('Unable to select a best CatBoost iteration')
+    return best
+
+
+def fit_catboost_with_external_selection(train_df, valid_df, feature_info, params, task_type='CPU', devices='0', random_seed=None, verbose=0, selection_eval_period=1):
+    X_train, X_valid = prep_catboost_frames(train_df, valid_df, feature_info)
+    y_train = train_df[TARGET_COL].copy()
+    y_valid = valid_df[TARGET_COL].copy()
+
+    model = build_catboost_model(
+        params,
+        task_type=task_type,
+        devices=devices,
+        random_seed=random_seed,
+        verbose=verbose
+    )
+
+    start = perf_counter()
+    model.fit(
+        X_train,
+        y_train,
+        cat_features=feature_info['cat_cols'],
+        use_best_model=False
+    )
+    fit_seconds = round(perf_counter() - start, 2)
+
+    best = pick_best_iteration(model, X_valid, y_valid, eval_period=selection_eval_period)
+    selected_iteration = int(best['selected_iteration'])
+    train_proba = model.predict_proba(X_train, ntree_end=selected_iteration)
+    valid_proba = model.predict_proba(X_valid, ntree_end=selected_iteration)
+    train_pred, train_metrics = score_multiclass_from_proba(y_train, train_proba, model.classes_)
+    valid_pred, valid_metrics = score_multiclass_from_proba(y_valid, valid_proba, model.classes_)
+
+    return {
+        'model': model,
+        'classes': model.classes_,
+        'fit_seconds': fit_seconds,
+        'selected_iteration': selected_iteration,
+        'train_pred': train_pred,
+        'train_proba': train_proba,
+        'train_metrics': train_metrics,
+        'valid_pred': valid_pred,
+        'valid_proba': valid_proba,
+        'valid_metrics': valid_metrics,
+        'raw_best_score': model.get_best_score()
+    }
+
+
+# -----------------------------------------------------------------------------
+# Multi-label helpers
+# -----------------------------------------------------------------------------
+def parse_pipe_labels(series):
+    labels = []
+    for value in series.astype('string').fillna(''):
+        parts = [part for part in str(value).split('|') if part]
+        labels.append(parts)
+    return labels
+
+
+def score_multilabel_predictions(y_true, y_pred, proba, top_k=3):
+    truth = np.asarray(y_true)
+    pred = np.asarray(y_pred)
+    top_k = min(int(top_k), proba.shape[1])
+    top_idx = np.argsort(proba, axis=1)[:, -top_k:][:, ::-1]
+
+    recall_rows = []
+    precision_rows = []
+    for row_idx in range(len(truth)):
+        true_set = set(np.flatnonzero(truth[row_idx] > 0))
+        pred_set = set(top_idx[row_idx])
+        overlap = len(true_set & pred_set)
+        recall_rows.append(overlap / max(len(true_set), 1))
+        precision_rows.append(overlap / max(top_k, 1))
+
+    coverage = float(pred.any(axis=0).mean())
+    return {
+        'micro_f1': round(float(f1_score(truth, pred, average='micro', zero_division=0)), 4),
+        'macro_f1': round(float(f1_score(truth, pred, average='macro', zero_division=0)), 4),
+        'recall_at_3': round(float(np.mean(recall_rows)), 4),
+        'precision_at_3': round(float(np.mean(precision_rows)), 4),
+        'label_coverage': round(coverage, 4)
+    }
+
+
+def apply_multilabel_threshold(proba, threshold, min_positive_labels=0):
+    proba = np.asarray(proba)
+    pred = (proba >= float(threshold)).astype(int)
+    min_positive_labels = max(int(min_positive_labels), 0)
+
+    if min_positive_labels == 0 or pred.size == 0:
+        return pred
+
+    min_positive_labels = min(min_positive_labels, pred.shape[1])
+    missing_mask = pred.sum(axis=1) < min_positive_labels
+    if not np.any(missing_mask):
+        return pred
+
+    top_idx = np.argsort(proba[missing_mask], axis=1)[:, -min_positive_labels:]
+    missing_rows = np.flatnonzero(missing_mask)
+    for row_idx, column_idx in zip(missing_rows, top_idx):
+        pred[row_idx, column_idx] = 1
+    return pred
+
+
+def select_multilabel_threshold(y_true, proba, thresholds=None, min_positive_labels=0):
+    thresholds = thresholds or [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+    best = None
+
+    for threshold in thresholds:
+        pred = apply_multilabel_threshold(
+            proba,
+            threshold,
+            min_positive_labels=min_positive_labels
+        )
+        scores = score_multilabel_predictions(y_true, pred, proba, top_k=MAX_TOP_K)
+        candidate = {
+            'threshold': float(threshold),
+            **scores
+        }
+        ranking = (
+            candidate['macro_f1'],
+            candidate['micro_f1'],
+            candidate['recall_at_3'],
+            candidate['precision_at_3'],
+            -candidate['threshold']
+        )
+        if best is None:
+            best = candidate
+            continue
+        best_ranking = (
+            best['macro_f1'],
+            best['micro_f1'],
+            best['recall_at_3'],
+            best['precision_at_3'],
+            -best['threshold']
+        )
+        if ranking > best_ranking:
+            best = candidate
+
+    return best
