@@ -25,7 +25,8 @@ def test_merge_text_sidecar_fills_defaults_for_missing_cases():
         {
             'odino': ['1', '2'],
             'component_group': ['ENGINE', 'BRAKES'],
-            'ldate': ['2024-01-01', '2024-01-02']
+            'ldate': ['2024-01-01', '2024-01-02'],
+            'source_era': ['post_2021_case', pd.NA]
         }
     )
     sidecar_df = pd.DataFrame(
@@ -46,6 +47,8 @@ def test_merge_text_sidecar_fills_defaults_for_missing_cases():
     missing_row = merged.loc[merged['odino'].eq('2')].iloc[0]
 
     assert len(merged) == 2
+    assert merged.loc[merged['odino'].eq('1'), 'source_era'].iloc[0] == 'post_2021_case'
+    assert pd.isna(merged.loc[merged['odino'].eq('2'), 'source_era'].iloc[0])
     assert missing_row['cdescr_model_text'] == ''
     assert bool(missing_row['cdescr_missing_flag']) is True
     assert int(missing_row['cdescr_word_count']) == 0

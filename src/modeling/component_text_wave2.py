@@ -382,13 +382,24 @@ def merge_text_sidecar(case_df, sidecar_df):
         'cdescr_word_count',
         'source_era'
     ]
-    merged = work.merge(text_df[keep_cols], on=ID_COL, how='left', validate='one_to_one')
+    merge_df = text_df[keep_cols].copy()
+    if 'source_era' in work.columns:
+        merge_df = merge_df.rename(columns={'source_era': 'source_era_text'})
+    merged = work.merge(merge_df, on=ID_COL, how='left', validate='one_to_one')
     merged['cdescr'] = merged['cdescr'].astype('string')
     merged['cdescr_model_text'] = merged['cdescr_model_text'].fillna('').astype(str)
     merged['cdescr_missing_flag'] = merged['cdescr_missing_flag'].fillna(True).astype(bool)
     merged['cdescr_placeholder_flag'] = merged['cdescr_placeholder_flag'].fillna(False).astype(bool)
     merged['cdescr_char_len'] = pd.to_numeric(merged['cdescr_char_len'], errors='coerce').fillna(0).astype('Int64')
     merged['cdescr_word_count'] = pd.to_numeric(merged['cdescr_word_count'], errors='coerce').fillna(0).astype('Int64')
+    if 'source_era_text' in merged.columns:
+        merged['source_era'] = merged['source_era'].where(
+            merged['source_era'].notna(),
+            merged['source_era_text']
+        )
+        merged = merged.drop(columns=['source_era_text'])
+    elif 'source_era' not in merged.columns:
+        merged['source_era'] = pd.NA
     merged['source_era'] = merged['source_era'].astype('string')
     return merged
 
