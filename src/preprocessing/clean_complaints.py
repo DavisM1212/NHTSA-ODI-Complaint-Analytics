@@ -16,14 +16,14 @@ CLEAN_STEM = 'odi_complaints_cleaned'
 SEVERITY_STEM = 'odi_severity_cases'
 COMPONENT_STEM = 'odi_component_rows'
 SUMMARY_NAME = 'clean_complaints_summary.csv'
+DRIFT_NAME = 'clean_complaints_source_era_drift.csv'
 
 
 # -----------------------------------------------------------------------------
 # Domain constants
 # -----------------------------------------------------------------------------
 VEHICLE_TYPE = 'V'
-COMPONENT_MIN_ROWS = 250
-
+SCHEMA_CHANGE_DATE = pd.Timestamp('2021-05-17')
 VALID_PROD_TYPES = {'C', 'E', 'T', 'V'}
 
 COMPONENT_DROP_CHILD_PARENTS = {
@@ -144,7 +144,30 @@ YN_COLS = [
     'vehicles_towed_yn'
 ]
 
+DRIFT_YN_COLS = [
+    'crash',
+    'fire',
+    'medical_attn',
+    'vehicles_towed_yn',
+    'police_rpt_yn',
+    'orig_owner_yn',
+    'anti_brakes_yn',
+    'cruise_cont_yn',
+    'repaired_yn'
+]
+
+DRIFT_NUM_COLS = [
+    'miles',
+    'veh_speed',
+    'injured',
+    'deaths',
+    'lag_days_safe'
+]
+
 CASE_FIRST_COLS = [
+    'source_era',
+    'source_zip',
+    'source_file',
     'mfr_name',
     'maketxt',
     'modeltxt',
@@ -197,12 +220,17 @@ CASE_ANY_FLAGS = [
     'flag_date_order_bad',
     'flag_fail_old_new_vehicle',
     'flag_fail_pre_model',
-    'flag_fail_pre_model_far'
+    'flag_fail_pre_model_far',
+    'miles_zero_flag',
+    'veh_speed_zero_flag'
 ]
 
 COMPONENT_COLS = [
     'cmplid',
     'odino',
+    'source_era',
+    'source_zip',
+    'source_file',
     'mfr_name',
     'maketxt',
     'modeltxt',
@@ -226,6 +254,7 @@ COMPONENT_COLS = [
     'orig_owner_yn',
     'anti_brakes_yn',
     'cruise_cont_yn',
+    'repaired_yn',
     'drive_train',
     'fuel_sys',
     'fuel_type',
@@ -239,6 +268,8 @@ COMPONENT_COLS = [
     'vehicles_towed_yn',
     'miles_missing_flag',
     'veh_speed_missing_flag',
+    'miles_zero_flag',
+    'veh_speed_zero_flag',
     'faildate_trusted_flag',
     'faildate_untrusted_flag',
     'severity_primary_row_flag',
@@ -260,7 +291,6 @@ COMPONENT_COLS = [
 # -----------------------------------------------------------------------------
 # Small helpers
 # -----------------------------------------------------------------------------
-# Make sure all required columns are present
 def require_columns(df):
     missing = [column for column in REQ_COLS if column not in df.columns]
     if missing:
@@ -268,7 +298,6 @@ def require_columns(df):
         raise ValueError(f'Missing required complaint columns: {missing_text}')
 
 
-# Make sure combined processed files exist
 def resolve_input_path(input_path=None):
     if input_path is not None:
         path = Path(input_path)
@@ -289,7 +318,6 @@ def resolve_input_path(input_path=None):
     )
 
 
-# Load data in regardless of file type
 def load_complaints(input_path=None):
     path = resolve_input_path(input_path)
     if path.suffix.lower() == '.parquet':
@@ -297,7 +325,6 @@ def load_complaints(input_path=None):
     return pd.read_csv(path, dtype=str, low_memory=False)
 
 
-# Determine if date fields are sensible
 def add_safe_lag_fields(df):
     fail_year = df['faildate'].dt.year.astype('Int64')
     year_ok = df['yeartxt'].isna() | (fail_year >= df['yeartxt'] - 1)
@@ -314,7 +341,6 @@ def add_safe_lag_fields(df):
     return df
 
 
-# Create primary and secondary flags for severity of complaint
 def add_severity_flags(df, primary_name, broad_name):
     fire_yes = df['fire'].fillna('N').eq('Y')
     crash_yes = df['crash'].fillna('N').eq('Y')
@@ -333,7 +359,6 @@ def add_severity_flags(df, primary_name, broad_name):
     return df
 
 
-# Give component text a cleaner fighting chance
 def normalize_component_label(series):
     return (
         series.astype('string')
@@ -345,7 +370,6 @@ def normalize_component_label(series):
     )
 
 
-# Map raw component labels to the reviewed modeling target
 def map_component_group(label):
     if pd.isna(label):
         return pd.NA
@@ -354,36 +378,181 @@ def map_component_group(label):
 
     if label in COMPONENT_UNKNOWN_LABELS:
         return 'UNKNOWN OR OTHER'
-
     if parent in {'COMMUNICATION', 'COMMUNICATIONS'}:
         return 'COMMUNICATION'
-
     if parent in {'ENGINE', 'ENGINE AND ENGINE COOLING'}:
         return 'ENGINE / COOLING'
-
     if parent in {'VISIBILITY', 'VISIBILITY/WIPER'}:
         return 'VISIBILITY / WIPER'
-
     if parent in COMPONENT_FUEL_PARENTS:
         return 'FUEL / PROPULSION'
-
     if parent in COMPONENT_SERVICE_BRAKE_PARENTS:
         return 'SERVICE BRAKES'
-
     return parent
+
+
+def add_source_era(df):
+    source_era = pd.Series(pd.NA, index=df.index, dtype='string')
+    source_era.loc[df['ldate'].notna() & df['ldate'].lt(SCHEMA_CHANGE_DATE)] = 'pre_2021_schema_change'
+    source_era.loc[df['ldate'].notna() & df['ldate'].ge(SCHEMA_CHANGE_DATE)] = 'post_2021_schema_change'
+    df['source_era'] = source_era
+    return df
+
+
+def apply_modeling_zero_rules(df):
+    df['miles_zero_flag'] = df['miles'].eq(0)
+    df['veh_speed_zero_flag'] = df['veh_speed'].eq(0)
+    df.loc[df['miles_zero_flag'], 'miles'] = pd.NA
+    df.loc[df['veh_speed_zero_flag'], 'veh_speed'] = pd.NA
+    df['miles_missing_flag'] = df['miles'].isna()
+    df['veh_speed_missing_flag'] = df['veh_speed'].isna()
+    return df
+
+
+def build_source_era_drift(cleaned_df):
+    era_values = ['overall'] + sorted(cleaned_df['source_era'].dropna().unique().tolist())
+    rows = []
+
+    for source_era in era_values:
+        subset = cleaned_df if source_era == 'overall' else cleaned_df.loc[cleaned_df['source_era'].eq(source_era)]
+        row_count = int(len(subset))
+        if row_count == 0:
+            continue
+
+        for column in DRIFT_YN_COLS:
+            if column not in subset.columns:
+                continue
+            series = subset[column]
+            non_null = int(series.notna().sum())
+            yes_count = int(series.eq('Y').sum())
+            no_count = int(series.eq('N').sum())
+            rows.extend(
+                [
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'row_count',
+                        'value': row_count
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'non_null_count',
+                        'value': non_null
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'non_null_rate',
+                        'value': round(non_null / row_count, 4)
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'y_count',
+                        'value': yes_count
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'y_rate',
+                        'value': round(yes_count / row_count, 4)
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'n_count',
+                        'value': no_count
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'yn',
+                        'metric': 'n_rate',
+                        'value': round(no_count / row_count, 4)
+                    }
+                ]
+            )
+
+        for column in DRIFT_NUM_COLS:
+            if column not in subset.columns:
+                continue
+            series = pd.to_numeric(subset[column], errors='coerce')
+            non_null = int(series.notna().sum())
+            zero_flag_col = f'{column}_zero_flag'
+            if zero_flag_col in subset.columns:
+                zero_count = int(subset[zero_flag_col].sum())
+            else:
+                zero_count = int(series.eq(0).sum())
+            rows.extend(
+                [
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'row_count',
+                        'value': row_count
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'non_null_count',
+                        'value': non_null
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'missing_rate',
+                        'value': round(series.isna().mean(), 4)
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'zero_count',
+                        'value': zero_count
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'zero_rate',
+                        'value': round(zero_count / row_count, 4)
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'mean',
+                        'value': round(float(series.mean()), 4) if non_null else pd.NA
+                    },
+                    {
+                        'source_era': source_era,
+                        'field': column,
+                        'field_type': 'numeric',
+                        'metric': 'median',
+                        'value': round(float(series.median()), 4) if non_null else pd.NA
+                    }
+                ]
+            )
+
+    return pd.DataFrame(rows)
 
 
 # -----------------------------------------------------------------------------
 # Shared cleaning
 # -----------------------------------------------------------------------------
-# Apply the shared complaint cleaning rules settled in the notebook
 def clean_complaints(df):
     require_columns(df)
     work = df.copy()
-
-    for column in ['source_zip', 'source_file']:
-        if column in work.columns:
-            work = work.drop(columns=column)
 
     text_cols = work.select_dtypes(include=['object', 'string']).columns.tolist()
     for column in text_cols:
@@ -401,6 +570,8 @@ def clean_complaints(df):
     for column in INT_COLS:
         if column in work.columns:
             work[column] = pd.to_numeric(work[column], errors='coerce').astype('Int64')
+
+    work = add_source_era(work)
 
     fail_year = work['faildate'].dt.year.astype('Int64')
     model_year = work['yeartxt']
@@ -437,9 +608,7 @@ def clean_complaints(df):
     work.loc[work['flag_state_bad'], 'state'] = pd.NA
     work.loc[work['flag_dealer_state_bad'], 'dealer_state'] = pd.NA
 
-    work['miles_missing_flag'] = work['miles'].isna()
-    work['veh_speed_missing_flag'] = work['veh_speed'].isna()
-
+    work = apply_modeling_zero_rules(work)
     work = add_safe_lag_fields(work)
     return add_severity_flags(
         work,
@@ -448,11 +617,9 @@ def clean_complaints(df):
     )
 
 
-
 # -----------------------------------------------------------------------------
 # Task tables
 # -----------------------------------------------------------------------------
-# Collapse cleaned vehicle complaints to one row per complaint case
 def build_severity_cases(cleaned_df):
     vehicle_df = cleaned_df.loc[cleaned_df['prod_type'].eq(VEHICLE_TYPE) & cleaned_df['odino'].notna()].copy()
     if vehicle_df.empty:
@@ -488,8 +655,7 @@ def build_severity_cases(cleaned_df):
         temp_cols.extend([yes_col, present_col])
 
     if temp_cols:
-        yn_grouped = vehicle_df.groupby('odino', sort=True)[temp_cols].max()
-        frames.append(yn_grouped)
+        frames.append(vehicle_df.groupby('odino', sort=True)[temp_cols].max())
 
     case_df = pd.concat(frames, axis=1).reset_index()
 
@@ -511,7 +677,6 @@ def build_severity_cases(cleaned_df):
     )
 
 
-# Keep the cleaned vehicle complaint rows needed for component modeling
 def build_component_rows(cleaned_df):
     component_df = cleaned_df.loc[
         cleaned_df['prod_type'].eq(VEHICLE_TYPE) & cleaned_df['compdesc'].notna()
@@ -552,11 +717,6 @@ def build_component_rows(cleaned_df):
         .map(component_group_rows)
         .astype('Int64')
     )
-    component_df.loc[
-        component_df['component_drop_reason'].isna()
-        & component_df['component_group_rows'].lt(COMPONENT_MIN_ROWS).fillna(False),
-        'component_drop_reason'
-    ] = 'DROP_RARE_GROUP'
     component_df['component_keep_flag'] = component_df['component_drop_reason'].isna()
 
     keep_cols = [column for column in COMPONENT_COLS if column in component_df.columns]
@@ -566,7 +726,6 @@ def build_component_rows(cleaned_df):
 # -----------------------------------------------------------------------------
 # Summary output
 # -----------------------------------------------------------------------------
-# Get an overview of cleaning out
 def build_summary(cleaned_df, severity_df, component_df):
     vehicle_df = cleaned_df.loc[cleaned_df['prod_type'].eq(VEHICLE_TYPE)]
     kept_component_df = component_df.loc[component_df['component_keep_flag']]
@@ -614,17 +773,19 @@ def build_summary(cleaned_df, severity_df, component_df):
         }
     ]
 
-    component_drop_cols = [
-        'DROP_CHILD_RESTRAINT',
-        'DROP_EQUIPMENT',
-        'DROP_UNKNOWN_OTHER',
-        'DROP_RARE_GROUP'
-    ]
-    for drop_reason in component_drop_cols:
+    for drop_reason in ['DROP_CHILD_RESTRAINT', 'DROP_EQUIPMENT', 'DROP_UNKNOWN_OTHER']:
         summary_rows.append(
             {
                 'metric': f'component_{drop_reason.lower()}',
                 'value': int(component_df['component_drop_reason'].eq(drop_reason).sum())
+            }
+        )
+
+    for source_era, era_count in cleaned_df['source_era'].fillna('unknown').value_counts().sort_index().items():
+        summary_rows.append(
+            {
+                'metric': f'source_era_{source_era}',
+                'value': int(era_count)
             }
         )
 
@@ -640,6 +801,8 @@ def build_summary(cleaned_df, severity_df, component_df):
         'flag_date_order_bad',
         'flag_fail_pre_model',
         'flag_fail_pre_model_far',
+        'miles_zero_flag',
+        'veh_speed_zero_flag',
         'faildate_untrusted_flag',
         'miles_missing_flag',
         'veh_speed_missing_flag'
@@ -658,10 +821,9 @@ def build_summary(cleaned_df, severity_df, component_df):
 # -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------
-# Potential command line arguments, will be written to csv in data/outputs/
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Clean ODI complaints and build the first-pass structured task tables'
+        description='Clean ODI complaints and build audited structured task tables'
     )
     parser.add_argument(
         '--input-path',
@@ -677,7 +839,6 @@ def parse_args():
     return parser.parse_args()
 
 
-# The whole meal
 def main():
     args = parse_args()
     ensure_project_directories()
@@ -687,6 +848,7 @@ def main():
     severity_df = build_severity_cases(cleaned_df)
     component_df = build_component_rows(cleaned_df)
     summary_df = build_summary(cleaned_df, severity_df, component_df)
+    drift_df = build_source_era_drift(cleaned_df)
 
     clean_path = write_dataframe(
         cleaned_df,
@@ -704,12 +866,15 @@ def main():
         prefer_parquet=args.output_format == 'parquet'
     )
     summary_path = OUTPUTS_DIR / SUMMARY_NAME
+    drift_path = OUTPUTS_DIR / DRIFT_NAME
     summary_df.to_csv(summary_path, index=False)
+    drift_df.to_csv(drift_path, index=False)
 
     print(f'[write] {clean_path}')
     print(f'[write] {severity_path}')
     print(f'[write] {component_path}')
     print(f'[write] {summary_path}')
+    print(f'[write] {drift_path}')
     print('')
     print('[done] Complaint preprocessing finished')
     return 0
