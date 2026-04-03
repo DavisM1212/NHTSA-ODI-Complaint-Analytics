@@ -192,7 +192,9 @@ def evaluate_params_across_seeds(train_df, valid_df, feature_info, params, task_
             devices=devices,
             random_seed=seed,
             verbose=verbose,
-            selection_eval_period=selection_eval_period
+            selection_eval_period=selection_eval_period,
+            include_train_outputs=False,
+            include_valid_outputs=False
         )
         row = {
             'seed': seed,

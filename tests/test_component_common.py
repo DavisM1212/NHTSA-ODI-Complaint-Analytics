@@ -9,6 +9,7 @@ from src.modeling.component_common import (
     prep_single_label_cases,
     split_single_label_cases,
     split_single_label_cases_by_mode,
+    subset_case_frame,
 )
 
 
@@ -128,3 +129,26 @@ def test_split_single_label_cases_by_mode_builds_feature_wave_frames():
     assert len(split_parts['holdout_2026']) == 1
     assert len(split_parts['dev_2020_2024']) == 2
     assert len(split_parts['dev_2020_2025']) == 3
+
+
+def test_subset_case_frame_keeps_only_requested_columns():
+    feature_info = compose_feature_manifest(
+        'wave1_geo_family',
+        add_cols=['state_region', 'complaint_year']
+    )
+    df = pd.DataFrame([build_case_row(1, 'ENGINE / COOLING', '2024-01-01')])
+    df['state_region'] = ['SOUTH']
+    df['complaint_year'] = [2024]
+    df['extra_col'] = ['ignore_me']
+
+    prepared = prep_single_label_cases(df, feature_info['feature_cols'])
+    subset = subset_case_frame(prepared, ['mfr_name', 'state_region', 'complaint_year'])
+
+    assert subset.columns.tolist() == [
+        'odino',
+        'ldate',
+        'component_group',
+        'mfr_name',
+        'state_region',
+        'complaint_year'
+    ]

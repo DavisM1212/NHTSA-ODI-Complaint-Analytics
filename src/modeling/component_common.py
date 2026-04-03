@@ -511,6 +511,12 @@ def prep_multi_label_cases(df, feature_cols):
     return work
 
 
+def subset_case_frame(df, feature_cols, target_col=TARGET_COL):
+    require_case_columns(df, feature_cols, target_col=target_col)
+    keep_cols = dedupe_feature_cols([ID_COL, DATE_COL, target_col, *feature_cols])
+    return df[keep_cols].copy()
+
+
 def split_single_label_cases_by_mode(df, split_mode=BENCHMARK_SPLIT_MODE):
     policy = get_split_policy(split_mode)
 
@@ -979,7 +985,19 @@ def pick_best_iteration(model, X_valid, y_valid, eval_period=1):
     return best
 
 
-def fit_catboost_with_external_selection(train_df, valid_df, feature_info, params, task_type='CPU', devices='0', random_seed=None, verbose=0, selection_eval_period=1):
+def fit_catboost_with_external_selection(
+    train_df,
+    valid_df,
+    feature_info,
+    params,
+    task_type='CPU',
+    devices='0',
+    random_seed=None,
+    verbose=0,
+    selection_eval_period=1,
+    include_train_outputs=True,
+    include_valid_outputs=True
+):
     X_train, X_valid = prep_catboost_frames(train_df, valid_df, feature_info)
     y_train = train_df[TARGET_COL].copy()
     y_valid = valid_df[TARGET_COL].copy()
@@ -1001,17 +1019,38 @@ def fit_catboost_with_external_selection(train_df, valid_df, feature_info, param
     )
     fit_seconds = round(perf_counter() - start, 2)
 
+    selection_start = perf_counter()
     best = pick_best_iteration(model, X_valid, y_valid, eval_period=selection_eval_period)
+    selection_seconds = round(perf_counter() - selection_start, 2)
     selected_iteration = int(best['selected_iteration'])
-    train_proba = model.predict_proba(X_train, ntree_end=selected_iteration)
-    valid_proba = model.predict_proba(X_valid, ntree_end=selected_iteration)
-    train_pred, train_metrics = score_multiclass_from_proba(y_train, train_proba, model.classes_)
-    valid_pred, valid_metrics = score_multiclass_from_proba(y_valid, valid_proba, model.classes_)
+    train_pred = None
+    train_proba = None
+    train_metrics = None
+    valid_pred = None
+    valid_proba = None
+    valid_metrics = {
+        'top_1_accuracy': float(best['top_1_accuracy']),
+        'macro_f1': float(best['macro_f1']),
+        'top_3_accuracy': float(best['top_3_accuracy'])
+    }
+
+    prediction_start = perf_counter()
+    if include_train_outputs:
+        train_proba = model.predict_proba(X_train, ntree_end=selected_iteration)
+        train_pred, train_metrics = score_multiclass_from_proba(y_train, train_proba, model.classes_)
+    if include_valid_outputs:
+        valid_proba = model.predict_proba(X_valid, ntree_end=selected_iteration)
+        valid_pred, valid_metrics = score_multiclass_from_proba(y_valid, valid_proba, model.classes_)
+    prediction_seconds = round(perf_counter() - prediction_start, 2) if (
+        include_train_outputs or include_valid_outputs
+    ) else 0.0
 
     return {
         'model': model,
         'classes': model.classes_,
         'fit_seconds': fit_seconds,
+        'selection_seconds': selection_seconds,
+        'prediction_seconds': prediction_seconds,
         'selected_iteration': selected_iteration,
         'train_pred': train_pred,
         'train_proba': train_proba,

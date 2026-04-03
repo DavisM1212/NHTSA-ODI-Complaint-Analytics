@@ -42,6 +42,7 @@ from src.modeling.component_common import (
     sha256_path,
     split_multi_label_cases_by_mode,
     split_single_label_cases_by_mode,
+    subset_case_frame,
     write_json,
 )
 from src.modeling.component_multilabel import (
@@ -93,10 +94,39 @@ MULTI_THRESHOLDS = [0.10, 0.125, 0.15, 0.175, 0.20, 0.225, 0.25, 0.275, 0.30]
 MULTI_ITERATIONS = 1800
 SINGLE_TUNE_TRIALS = 24
 SINGLE_TUNE_ITER_MAX = 2200
+SINGLE_SCREEN_EVAL_PERIOD = 25
 
 
 def log_line(message=''):
     print(message, flush=True)
+
+
+def log_family_start(task_name, stage_name, feature_name, run_idx, run_total):
+    log_line(f'[{task_name}] {stage_name} {run_idx}/{run_total} -> {feature_name}')
+
+
+def log_single_result(stage_name, feature_name, row, result):
+    log_line(
+        f'[single] {stage_name} {feature_name} done '
+        f'fit={float(result["fit_seconds"]):.2f}s '
+        f'select={float(result.get("selection_seconds", 0.0)):.2f}s '
+        f'iter={int(result["selected_iteration"])} '
+        f'macro_f1={float(row["macro_f1"]):.4f} '
+        f'top1={float(row["top_1_accuracy"]):.4f} '
+        f'top3={float(row["top_3_accuracy"]):.4f}'
+    )
+
+
+def log_multi_result(stage_name, feature_name, row, result):
+    log_line(
+        f'[multi] {stage_name} {feature_name} done '
+        f'fit={float(result["fit_seconds"]):.2f}s '
+        f'iter={int(result["selected_iteration"])} '
+        f'threshold={float(result["selected_threshold"]):.3f} '
+        f'macro_f1={float(row["macro_f1"]):.4f} '
+        f'micro_f1={float(row["micro_f1"]):.4f} '
+        f'recall@3={float(row["recall_at_3"]):.4f}'
+    )
 
 
 def load_json(path):
@@ -200,8 +230,8 @@ def keep_if_better_or_equal(candidate_row, current_row, metric_cols):
 # Single-label helpers
 # -----------------------------------------------------------------------------
 def score_single_family(train_df, eval_df, feature_info, params, task_type, devices, random_seed, selection_eval_period, input_path, stage_name):
-    train_ready = prep_single_label_cases(train_df, feature_info['feature_cols'])
-    eval_ready = prep_single_label_cases(eval_df, feature_info['feature_cols'])
+    train_ready = subset_case_frame(train_df, feature_info['feature_cols'], target_col=TARGET_COL)
+    eval_ready = subset_case_frame(eval_df, feature_info['feature_cols'], target_col=TARGET_COL)
     result = fit_catboost_with_external_selection(
         train_ready,
         eval_ready,
@@ -211,7 +241,9 @@ def score_single_family(train_df, eval_df, feature_info, params, task_type, devi
         devices=devices,
         random_seed=random_seed,
         verbose=0,
-        selection_eval_period=selection_eval_period
+        selection_eval_period=selection_eval_period,
+        include_train_outputs=False,
+        include_valid_outputs=False
     )
     row = {
         **feature_row_base(
@@ -234,8 +266,8 @@ def score_single_family(train_df, eval_df, feature_info, params, task_type, devi
 
 
 def fit_single_holdout(train_df, holdout_df, feature_info, params, selected_iteration, task_type, devices, random_seed):
-    train_ready = prep_single_label_cases(train_df, feature_info['feature_cols'])
-    holdout_ready = prep_single_label_cases(holdout_df, feature_info['feature_cols'])
+    train_ready = subset_case_frame(train_df, feature_info['feature_cols'], target_col=TARGET_COL)
+    holdout_ready = subset_case_frame(holdout_df, feature_info['feature_cols'], target_col=TARGET_COL)
     X_train, X_holdout = prep_catboost_frames(train_ready, holdout_ready, feature_info)
     y_train = train_ready[TARGET_COL].copy()
     y_holdout = holdout_ready[TARGET_COL].copy()
@@ -306,8 +338,8 @@ def suggest_single_wave1_params(trial, locked_params):
 
 
 def retune_single_family(train_df, valid_df, feature_info, locked_params, task_type, devices, seed_list, selection_eval_period, random_seed):
-    train_ready = prep_single_label_cases(train_df, feature_info['feature_cols'])
-    valid_ready = prep_single_label_cases(valid_df, feature_info['feature_cols'])
+    train_ready = subset_case_frame(train_df, feature_info['feature_cols'], target_col=TARGET_COL)
+    valid_ready = subset_case_frame(valid_df, feature_info['feature_cols'], target_col=TARGET_COL)
 
     def objective(trial):
         params = suggest_single_wave1_params(trial, locked_params)
@@ -383,11 +415,24 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
     holdout_df = split_parts[policy['holdout_name']]
 
     locked_params = locked_single_selection['best_params']
-    selection_eval_period = int(
+    locked_eval_period = int(
         locked_single_selection.get('selection_policy', {}).get('selection_eval_period', 10)
     )
+    screen_eval_period = int(args.single_screen_eval_period) if args.single_screen_eval_period else max(
+        SINGLE_SCREEN_EVAL_PERIOD,
+        locked_eval_period
+    )
+    retune_eval_period = int(args.single_retune_eval_period) if args.single_retune_eval_period else locked_eval_period
 
-    log_line('[single] Screen baseline core_structured')
+    log_line(
+        f'[single] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
+        f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,}'
+    )
+    log_line(
+        f'[single] Eval periods | screen/select={screen_eval_period} retune={retune_eval_period}'
+    )
+
+    log_family_start('single', 'screen_2024', 'core_structured', 1, 5)
     core_family = feature_families['core_structured']
     core_screen_row, _ = score_single_family(
         train_core_df,
@@ -397,19 +442,27 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
         task_type=str(args.task_type).upper(),
         devices=args.devices,
         random_seed=args.random_seed,
-        selection_eval_period=selection_eval_period,
+        selection_eval_period=screen_eval_period,
         input_path=input_path,
         stage_name='screen_2024'
     )
     screen_rows.append(core_screen_row)
+    log_line(
+        f'[single] screen_2024 core_structured done '
+        f'macro_f1={float(core_screen_row["macro_f1"]):.4f} '
+        f'top1={float(core_screen_row["top_1_accuracy"]):.4f} '
+        f'top3={float(core_screen_row["top_3_accuracy"]):.4f}'
+    )
 
     bundle_rows = []
-    for family_name in [
+    screen_family_names = [
         'wave1_incident_bundle',
         'wave1_date_quality_bundle',
         'wave1_geo_time_bundle',
         'wave1_cohort_history_bundle'
-    ]:
+    ]
+    for family_idx, family_name in enumerate(screen_family_names, start=2):
+        log_family_start('single', 'screen_2024', family_name, family_idx, 5)
         row, _ = score_single_family(
             train_core_df,
             screen_df,
@@ -418,12 +471,18 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             task_type=str(args.task_type).upper(),
             devices=args.devices,
             random_seed=args.random_seed,
-            selection_eval_period=selection_eval_period,
+            selection_eval_period=screen_eval_period,
             input_path=input_path,
             stage_name='screen_2024'
         )
         bundle_rows.append(row)
         screen_rows.append(row)
+        log_line(
+            f'[single] screen_2024 {family_name} done '
+            f'macro_f1={float(row["macro_f1"]):.4f} '
+            f'top1={float(row["top_1_accuracy"]):.4f} '
+            f'top3={float(row["top_3_accuracy"]):.4f}'
+        )
 
     bundle_ranked = sort_candidate_rows(
         bundle_rows,
@@ -431,7 +490,8 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
     )
     top_bundle_names = [row['feature_set_name'] for row in bundle_ranked[:3]]
 
-    core_select_row, _ = score_single_family(
+    log_family_start('single', 'select_2025', 'core_structured', 1, 7)
+    core_select_row, core_select_result = score_single_family(
         dev_screen_df,
         select_df,
         core_family,
@@ -439,16 +499,18 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
         task_type=str(args.task_type).upper(),
         devices=args.devices,
         random_seed=args.random_seed,
-        selection_eval_period=selection_eval_period,
+        selection_eval_period=screen_eval_period,
         input_path=input_path,
         stage_name='select_2025'
     )
     select_rows.append(core_select_row)
+    log_single_result('select_2025', 'core_structured', core_select_row, core_select_result)
 
     candidate_rows = []
     candidate_info_lookup = {}
-    for family_name in top_bundle_names:
-        row, _ = score_single_family(
+    for family_idx, family_name in enumerate(top_bundle_names, start=2):
+        log_family_start('single', 'select_2025', family_name, family_idx, 7)
+        row, result = score_single_family(
             dev_screen_df,
             select_df,
             feature_families[family_name],
@@ -456,16 +518,18 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             task_type=str(args.task_type).upper(),
             devices=args.devices,
             random_seed=args.random_seed,
-            selection_eval_period=selection_eval_period,
+            selection_eval_period=screen_eval_period,
             input_path=input_path,
             stage_name='select_2025'
         )
         select_rows.append(row)
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
+        log_single_result('select_2025', family_name, row, result)
 
-    for family_name in WAVE1_PAIRWISE_FAMILIES:
-        row, _ = score_single_family(
+    for family_idx, family_name in enumerate(WAVE1_PAIRWISE_FAMILIES, start=5):
+        log_family_start('single', 'select_2025', family_name, family_idx, 7)
+        row, result = score_single_family(
             dev_screen_df,
             select_df,
             feature_families[family_name],
@@ -473,13 +537,14 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             task_type=str(args.task_type).upper(),
             devices=args.devices,
             random_seed=args.random_seed,
-            selection_eval_period=selection_eval_period,
+            selection_eval_period=screen_eval_period,
             input_path=input_path,
             stage_name='select_2025'
         )
         select_rows.append(row)
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
+        log_single_result('select_2025', family_name, row, result)
 
     best_select_row = select_best_row(
         pd.DataFrame(candidate_rows),
@@ -492,7 +557,8 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
         pruned_info = build_pruned_feature_info(best_feature_info, prune_col)
         if pruned_info is None:
             continue
-        row, _ = score_single_family(
+        log_line(f'[single] select_prune -> drop {prune_col}')
+        row, result = score_single_family(
             dev_screen_df,
             select_df,
             pruned_info,
@@ -500,11 +566,12 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             task_type=str(args.task_type).upper(),
             devices=args.devices,
             random_seed=args.random_seed,
-            selection_eval_period=selection_eval_period,
+            selection_eval_period=screen_eval_period,
             input_path=input_path,
             stage_name='select_prune'
         )
         select_rows.append(row)
+        log_single_result('select_prune', pruned_info['feature_set_name'], row, result)
         if keep_if_better_or_equal(row, current_best_row, ['macro_f1', 'top_1_accuracy', 'top_3_accuracy']):
             current_best_row = row
             best_feature_info = pruned_info
@@ -535,7 +602,7 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             task_type=str(args.task_type).upper(),
             devices=args.devices,
             seed_list=DEFAULT_SELECTION_SEEDS,
-            selection_eval_period=selection_eval_period,
+            selection_eval_period=retune_eval_period,
             random_seed=args.random_seed
         )
         single_trials_df = pd.DataFrame(
@@ -562,7 +629,8 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
                 'split_mode': FEATURE_WAVE1_SPLIT_MODE,
                 'n_trials': SINGLE_TUNE_TRIALS,
                 'seed_list': DEFAULT_SELECTION_SEEDS,
-                'iteration_cap': SINGLE_TUNE_ITER_MAX
+                'iteration_cap': SINGLE_TUNE_ITER_MAX,
+                'selection_eval_period': retune_eval_period
             }
         }
         holdout_result = fit_single_holdout(
@@ -749,7 +817,13 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
     dev_select_df = split_parts[policy['dev_name']]
     holdout_df = split_parts[policy['holdout_name']]
 
+    log_line(
+        f'[multi] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
+        f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,}'
+    )
+
     core_family = feature_families['core_structured']
+    log_family_start('multi', 'screen_2024', 'core_structured', 1, 5)
     core_screen_row, _ = score_multi_family(
         train_core_df,
         screen_df,
@@ -761,14 +835,22 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         stage_name='screen_2024'
     )
     screen_rows.append(core_screen_row)
+    log_line(
+        f'[multi] screen_2024 core_structured done '
+        f'macro_f1={float(core_screen_row["macro_f1"]):.4f} '
+        f'micro_f1={float(core_screen_row["micro_f1"]):.4f} '
+        f'recall@3={float(core_screen_row["recall_at_3"]):.4f}'
+    )
 
     bundle_rows = []
-    for family_name in [
+    screen_family_names = [
         'wave1_incident_bundle',
         'wave1_date_quality_bundle',
         'wave1_geo_time_bundle',
         'wave1_cohort_history_bundle'
-    ]:
+    ]
+    for family_idx, family_name in enumerate(screen_family_names, start=2):
+        log_family_start('multi', 'screen_2024', family_name, family_idx, 5)
         row, _ = score_multi_family(
             train_core_df,
             screen_df,
@@ -781,6 +863,12 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         )
         bundle_rows.append(row)
         screen_rows.append(row)
+        log_line(
+            f'[multi] screen_2024 {family_name} done '
+            f'macro_f1={float(row["macro_f1"]):.4f} '
+            f'micro_f1={float(row["micro_f1"]):.4f} '
+            f'recall@3={float(row["recall_at_3"]):.4f}'
+        )
 
     bundle_ranked = sort_candidate_rows(
         bundle_rows,
@@ -788,7 +876,8 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
     )
     top_bundle_names = [row['feature_set_name'] for row in bundle_ranked[:3]]
 
-    core_select_row, _ = score_multi_family(
+    log_family_start('multi', 'select_2025', 'core_structured', 1, 7)
+    core_select_row, core_select_result = score_multi_family(
         dev_screen_df,
         select_df,
         core_family,
@@ -799,11 +888,13 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         stage_name='select_2025'
     )
     select_rows.append(core_select_row)
+    log_multi_result('select_2025', 'core_structured', core_select_row, core_select_result)
 
     candidate_rows = []
     candidate_info_lookup = {}
     candidate_selection_lookup = {}
-    for family_name in top_bundle_names:
+    for family_idx, family_name in enumerate(top_bundle_names, start=2):
+        log_family_start('multi', 'select_2025', family_name, family_idx, 7)
         row, result = score_multi_family(
             dev_screen_df,
             select_df,
@@ -818,8 +909,10 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
         candidate_selection_lookup[family_name] = result
+        log_multi_result('select_2025', family_name, row, result)
 
-    for family_name in WAVE1_PAIRWISE_FAMILIES:
+    for family_idx, family_name in enumerate(WAVE1_PAIRWISE_FAMILIES, start=5):
+        log_family_start('multi', 'select_2025', family_name, family_idx, 7)
         row, result = score_multi_family(
             dev_screen_df,
             select_df,
@@ -834,6 +927,7 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
         candidate_selection_lookup[family_name] = result
+        log_multi_result('select_2025', family_name, row, result)
 
     best_select_row = select_best_row(
         pd.DataFrame(candidate_rows),
@@ -847,6 +941,7 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         pruned_info = build_pruned_feature_info(best_feature_info, prune_col)
         if pruned_info is None:
             continue
+        log_line(f'[multi] select_prune -> drop {prune_col}')
         row, result = score_multi_family(
             dev_screen_df,
             select_df,
@@ -858,6 +953,7 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
             stage_name='select_prune'
         )
         select_rows.append(row)
+        log_multi_result('select_prune', pruned_info['feature_set_name'], row, result)
         if keep_if_better_or_equal(row, current_best_row, ['macro_f1', 'micro_f1', 'recall_at_3', 'precision_at_3']):
             current_best_row = row
             best_feature_info = pruned_info
@@ -954,6 +1050,18 @@ def parse_args():
     parser.add_argument(
         '--skip-multi',
         action='store_true'
+    )
+    parser.add_argument(
+        '--single-screen-eval-period',
+        type=int,
+        default=None,
+        help='External CatBoost selection scan interval for single-label screen/select scoring'
+    )
+    parser.add_argument(
+        '--single-retune-eval-period',
+        type=int,
+        default=None,
+        help='External CatBoost selection scan interval for single-label retuning'
     )
     return parser.parse_args()
 
