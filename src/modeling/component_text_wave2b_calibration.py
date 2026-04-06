@@ -239,6 +239,7 @@ def parse_args():
         default=None,
         help='Override the Wave 2 selected late-fusion text weight',
     )
+    parser.add_argument('--skip-readme-update', action='store_true')
     return parser.parse_args()
 
 
@@ -500,6 +501,14 @@ def main():
         },
     }
     write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+
+    if not args.skip_readme_update:
+        try:
+            from src.reporting.update_component_readme import update_component_readme
+
+            update_component_readme(single_manifest_path=OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+        except Exception as exc:
+            print(f'[warn] README benchmark update skipped: {exc}')
 
     log_line(
         f'[wave2b] holdout calibrated macro_f1={float(calibrated_row["macro_f1"]):.4f} '

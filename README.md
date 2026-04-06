@@ -9,7 +9,7 @@ This repository is designed for a DSBA 6156 (Machine Learning) group project. Th
 - easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
 
-The current workflow already covers complaint ingestion, EDA, audited cleaning, single-label and multi-label component target construction, and reproducible benchmark scripts for structured component prediction. The next major steps are complaint severity ranking and NLP-driven early warning.
+The current workflow already covers complaint ingestion, EDA, audited cleaning, single-label and multi-label component target construction, structured component benchmarks, and a promoted complaint-narrative single-label component model. The next major steps are complaint severity ranking and NLP-driven early warning beyond component classification.
 
 ## Project Overview
 
@@ -20,7 +20,7 @@ This project works with NHTSA ODI complaint datasets (complaints first, optional
 3. build processed complaint tables in `data/processed/`
 4. apply conservative, schema-aware cleaning and issue flagging
 5. build task-specific modeling tables for severity and component work
-6. benchmark structured models with time-aware validation
+6. benchmark component models with time-aware validation
 
 Important data workflow rule:
 
@@ -39,6 +39,9 @@ The repo is now beyond the initial scaffold stage. Current completed work includ
 - `src/modeling/tune_component_catboost.py`: canonical single-label feature selection + focused CatBoost model selection
 - `src/modeling/component_catboost.py`: final single-label benchmark with baselines and untouched 2026 holdout scoring
 - `src/modeling/component_multilabel.py`: multi-label routing benchmark on the full kept-case problem
+- `src/features/component_text_sidecar.py`: shared component narrative sidecar for leakage-aware text modeling
+- `src/modeling/component_text_wave2.py`: Wave 2 sparse-text experiment runner for component modeling
+- `src/modeling/component_text_wave2b_calibration.py`: promoted calibrated single-label component benchmark
 
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
@@ -46,14 +49,19 @@ The repo is now beyond the initial scaffold stage. Current completed work includ
 This section is generated from the benchmark manifests in `data/outputs/`.
 The official published component-model scores come from the untouched `2026` holdout.
 
-#### Single-label structured benchmark
+#### Single-label component benchmark
 
-- Scope: scoped baseline on the single-label complaint subset
-- Feature set: `core_structured`
-- Selected CatBoost iteration: `1595`
-- Holdout macro F1: `0.3319`
-- Holdout top-1 accuracy: `0.4722`
-- Holdout top-3 accuracy: `0.7052`
+- Scope: scoped benchmark on the single-label complaint subset
+- Model: `text_structured_late_fusion`
+- Inputs: complaint narrative text + `wave1_incident_cohort_history` structured companion features
+- Text weight: `0.75`
+- Final text model: `sgd`
+- Calibration: `power` alpha `1.5` from `select_2025`
+- Structured branch iteration: `1280`
+- Holdout macro F1: `0.7454`
+- Holdout top-1 accuracy: `0.8523`
+- Holdout top-3 accuracy: `0.9500`
+- Holdout calibration ECE: `0.0243`
 
 #### Multi-label routing benchmark
 
@@ -124,9 +132,13 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |-- preprocessing/
     |   `-- clean_complaints.py
     |-- features/
-    |   `-- collapse_components.py
+    |   |-- collapse_components.py
+    |   `-- component_text_sidecar.py
     |-- modeling/
     |   |-- component_catboost.py
+    |   |-- component_multilabel.py
+    |   |-- component_text_wave2.py
+    |   |-- component_text_wave2b_calibration.py
     |   `-- tune_component_catboost.py
     |-- evaluation/
     |-- nlp/
@@ -246,6 +258,8 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
   - `odi_severity_cases.parquet`
   - `odi_component_rows.parquet`
   - `odi_component_model_cases.parquet`
+  - `odi_component_multilabel_cases.parquet`
+  - `odi_component_text_sidecar.parquet`
 - Ignored by Git
 
 `data/outputs/`
@@ -257,6 +271,8 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
   - `collapse_components_summary.csv`
   - `component_single_label_selection_manifest.json`
   - `component_single_label_benchmark_metrics.csv`
+  - `component_textwave2b_calibration_manifest.json`
+  - `component_official_benchmark_summary.csv`
   - `component_single_label_feature_importance.csv`
   - `component_multilabel_metrics.csv`
 - Ignored by Git
@@ -352,13 +368,16 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Feature engineering code for ML/NLP/time-based models
 - `collapse_components.py`: builds the single-label benchmark case table and the broader multi-label routing table
+- `component_text_sidecar.py`: builds one narrative text sidecar row per complaint for component text modeling
 
 `src/modeling/`
 
 - Model training logic (baselines first, then stronger models)
-- `component_catboost.py`: final single-label benchmark with baselines, holdout scoring, calibration, and manifests
+- `component_catboost.py`: structured single-label benchmark with baselines, holdout scoring, calibration, and manifests
 - `tune_component_catboost.py`: single-label feature-set selection plus focused CatBoost tuning
 - `component_multilabel.py`: multi-label routing benchmark for the full kept-case target
+- `component_text_wave2.py`: Wave 2 sparse-text component modeling experiment path
+- `component_text_wave2b_calibration.py`: calibrated single-label component model promoted as the official single-label benchmark
 
 `src/evaluation/`
 
@@ -625,9 +644,10 @@ After raw ingestion, the current analysis flow is:
 
 1. shared cleaning
 2. component case collapse
-3. single-label model selection
-4. single-label holdout benchmark
-5. multi-label routing benchmark
+3. component narrative sidecar build
+4. structured single-label model selection and benchmark
+5. promoted single-label text calibration benchmark
+6. multi-label routing benchmark
 
 #### Shared cleaning
 
@@ -641,7 +661,13 @@ After raw ingestion, the current analysis flow is:
 .\.venv\Scripts\python.exe -m src.features.collapse_components --output-format parquet
 ```
 
-#### Single-label model selection
+#### Component narrative sidecar
+
+```powershell
+.\.venv\Scripts\python.exe -m src.features.component_text_sidecar --output-format parquet
+```
+
+#### Structured single-label model selection
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type CPU --n-trials 40 --seed-list 42,43,44,45,46
@@ -659,7 +685,7 @@ If you want a middle ground instead of the full canonical run, keep your own tri
 .\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --feature-set core_structured --n-trials 12 --seed-list 42,43
 ```
 
-#### Single-label holdout benchmark
+#### Structured single-label holdout benchmark
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.modeling.component_catboost --task-type CPU
@@ -672,13 +698,28 @@ python -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --n-t
 python -m src.modeling.component_catboost --task-type GPU --devices 0
 ```
 
+#### Promoted single-label text benchmark
+
+The official single-label component result is the calibrated Wave 2b text + structured late-fusion model. It depends on the component text sidecar and the Wave 2 experiment manifest.
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.component_text_wave2 --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
+.\.venv\Scripts\python.exe -m src.modeling.component_text_wave2b_calibration --task-type GPU --devices 0 --final-linear-model sgd --alpha-grid 1,1.25,1.5,1.75,2,2.5,3,4,5,6,8
+```
+
 #### Multi-label routing benchmark
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.modeling.component_multilabel
 ```
 
-These commands produce the benchmark tables and manifests used by the generated README benchmark section.
+#### Refresh generated reporting
+
+```powershell
+.\.venv\Scripts\python.exe -m src.reporting.update_component_readme
+```
+
+These commands produce the benchmark tables, manifests, official summary artifacts, and generated README benchmark section.
 
 ## Git Basics Overview
 

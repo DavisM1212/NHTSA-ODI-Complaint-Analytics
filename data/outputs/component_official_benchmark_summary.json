@@ -1,0 +1,33 @@
+{
+  "benchmarks": [
+    {
+      "task": "single_label_component",
+      "official_model": "text_structured_late_fusion",
+      "artifact_role": "text_wave2b_calibration",
+      "feature_set": "wave1_incident_cohort_history",
+      "holdout_rows": 6995,
+      "macro_f1": 0.7454,
+      "top_1_accuracy": 0.8523,
+      "top_3_accuracy": 0.95,
+      "ece": 0.0243,
+      "calibration_method": "power",
+      "calibration_alpha": 1.5,
+      "status": "promoted"
+    },
+    {
+      "task": "multi_label_component_routing",
+      "official_model": "CatBoost MultiLabel",
+      "artifact_role": "final_benchmark",
+      "feature_set": "core_structured",
+      "holdout_rows": 10192,
+      "macro_f1": 0.2285,
+      "micro_f1": 0.4571,
+      "recall_at_3": 0.6751,
+      "precision_at_3": 0.3027,
+      "label_coverage": 0.8,
+      "threshold": 0.2,
+      "selected_iteration": 1200.0,
+      "status": "official"
+    }
+  ]
+}

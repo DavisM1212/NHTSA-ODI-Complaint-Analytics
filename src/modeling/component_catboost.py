@@ -643,7 +643,7 @@ def main():
         try:
             from src.reporting.update_component_readme import update_component_readme
 
-            update_component_readme(single_manifest_path=manifest_path)
+            update_component_readme()
         except Exception as exc:
             print(f'[warn] README benchmark update skipped: {exc}')
 
