@@ -325,7 +325,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - These files mark folders as Python packages so imports work cleanly
   - i.e. the Python files in the folder can be imported the same way you would a library like Pandas with the functions in the file acting like the modules
-- Example import: `from src.data.ingest_odi import main`
+- Example import: `from src.config.paths import ensure_project_directories`
 - They can stay empty and shouldn't need to be edited
 
 `src/config/`

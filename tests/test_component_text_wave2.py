@@ -1,15 +1,24 @@
 import numpy as np
 import pandas as pd
+from scipy import sparse
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.multiclass import OneVsRestClassifier
 
 from src.modeling.component_text_wave2 import (
+    FINAL_LINEAR_MODEL_DEFAULT,
     FUSION_TEXT_WEIGHTS,
     MULTI_THRESHOLDS,
     STRUCTURED_FEATURE_SET,
+    build_multi_final_model,
     build_multi_manifest_entry,
-    build_single_manifest_entry,
     build_overlap_mask,
+    build_single_final_model,
+    build_single_manifest_entry,
+    combine_matrices,
     fit_text_vectorizers,
+    log1p_clip_nonnegative,
     merge_text_sidecar,
+    prefer_decision_function_path,
     prepare_text_sidecar,
     safe_multi_predict_proba,
     safe_single_predict_proba,
@@ -22,6 +31,7 @@ def test_wave2_constants_match_the_locked_plan():
     assert STRUCTURED_FEATURE_SET == 'wave1_incident_cohort_history'
     assert FUSION_TEXT_WEIGHTS == [0.25, 0.50, 0.75]
     assert MULTI_THRESHOLDS == [0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20, 0.225, 0.25, 0.30]
+    assert FINAL_LINEAR_MODEL_DEFAULT == 'sgd'
 
 
 def test_merge_text_sidecar_fills_defaults_for_missing_cases():
@@ -153,6 +163,7 @@ def test_checkpoint_manifest_entries_include_stage_metadata():
             'input_path': 'single.parquet',
             'text_sidecar_path': 'sidecar.parquet',
             'selected_family': 'text_only_linear',
+            'final_linear_model': 'sgd',
             'checkpoint_stage': 'screen_2024_complete',
             'completed_stages': ['screen_2024']
         },
@@ -165,6 +176,7 @@ def test_checkpoint_manifest_entries_include_stage_metadata():
             'input_path': 'multi.parquet',
             'text_sidecar_path': 'sidecar.parquet',
             'selected_family': 'structured_carry_forward',
+            'final_linear_model': 'sgd',
             'checkpoint_stage': 'select_2025_complete',
             'completed_stages': ['screen_2024', 'select_2025']
         },
@@ -173,9 +185,49 @@ def test_checkpoint_manifest_entries_include_stage_metadata():
     )
 
     assert single_entry['checkpoint_stage'] == 'screen_2024_complete'
+    assert single_entry['final_linear_model'] == 'sgd'
     assert single_entry['artifacts']['screen'].endswith('component_single_label_textwave2_screen.csv')
     assert multi_entry['checkpoint_stage'] == 'select_2025_complete'
+    assert multi_entry['final_linear_model'] == 'sgd'
     assert multi_entry['artifacts']['holdout'].endswith('component_multilabel_textwave2_holdout.csv')
+
+
+def test_final_linear_model_builders_default_to_sgd():
+    single = build_single_final_model()
+    multi = build_multi_final_model()
+
+    assert isinstance(single, SGDClassifier)
+    assert isinstance(multi, OneVsRestClassifier)
+    assert isinstance(multi.estimator, SGDClassifier)
+
+
+def test_log1p_clip_nonnegative_handles_nonfinite_and_negative_values():
+    transformed = log1p_clip_nonnegative(np.array([[-5.0, 0.0, 9.0, np.nan, np.inf]]))
+
+    assert np.isfinite(transformed).all()
+    assert transformed[0, 0] == 0.0
+    assert transformed[0, 1] == 0.0
+    assert np.isclose(transformed[0, 2], np.log1p(9.0))
+
+
+def test_combine_matrices_can_row_normalize_sparse_blocks():
+    text = sparse.csr_matrix(np.array([[1.0, 0.0], [0.0, 2.0]]))
+    structured = sparse.csr_matrix(np.array([[100.0], [0.5]]))
+
+    combined = combine_matrices(text, structured, row_normalize=True)
+    row_norms = np.sqrt(combined.multiply(combined).sum(axis=1)).A1
+
+    assert np.allclose(row_norms, 1.0)
+
+
+def test_prefer_decision_function_path_targets_sgd_screen_models():
+    single = SGDClassifier(loss='log_loss')
+    multi = OneVsRestClassifier(SGDClassifier(loss='log_loss'))
+    final_model = LogisticRegression()
+
+    assert prefer_decision_function_path(single) is True
+    assert prefer_decision_function_path(multi) is True
+    assert prefer_decision_function_path(final_model) is False
 
 
 def test_safe_single_predict_proba_falls_back_to_decision_scores():

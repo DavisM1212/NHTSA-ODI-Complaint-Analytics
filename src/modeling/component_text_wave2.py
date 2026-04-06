@@ -14,7 +14,13 @@ from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import (
+    FunctionTransformer,
+    MultiLabelBinarizer,
+    OneHotEncoder,
+    StandardScaler,
+    normalize,
+)
 
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
@@ -118,6 +124,15 @@ STRUCTURED_MULTI_ITERATIONS = DEF_CATBOOST_ITERS
 STRUCTURED_MULTI_EVAL_PERIOD = DEF_CATBOOST_EVAL_PERIOD
 STRUCTURED_ONEHOT_MIN_FREQ = 50
 OVR_N_JOBS = -1
+LOG_SCALED_NUMERIC_COLS = {
+    'miles',
+    'veh_speed',
+    'injured',
+    'lag_days_safe',
+    'prior_cmpl_mfr_all',
+    'prior_cmpl_make_model_all',
+    'prior_cmpl_make_model_year_all',
+}
 SINGLE_PROMOTE_SELECT_DELTA = 0.010
 SINGLE_PROMOTE_HOLDOUT_DELTA = 0.010
 SINGLE_TOP3_DROP_LIMIT = 0.005
@@ -126,6 +141,13 @@ MULTI_PROMOTE_SELECT_DELTA = 0.015
 MULTI_PROMOTE_HOLDOUT_MACRO_DELTA = 0.015
 MULTI_PROMOTE_HOLDOUT_MICRO_DELTA = 0.010
 MULTI_LABEL_COVERAGE_FLOOR = 0.80
+FINAL_LINEAR_MODEL_DEFAULT = 'sgd'
+FINAL_LINEAR_MODEL_CHOICES = ['sgd', 'logreg']
+FINAL_SGD_ALPHA = 1e-6
+FINAL_SGD_MAX_ITER = 4000
+FINAL_SGD_TOL = 1e-4
+FINAL_SGD_VALIDATION_FRACTION = 0.05
+FINAL_SGD_N_ITER_NO_CHANGE = 5
 
 TEXT_SIDECAR_COLS = [
     ID_COL,
@@ -161,7 +183,8 @@ TEXT_CONFIG = {
     },
     'fusion_text_weights': FUSION_TEXT_WEIGHTS,
     'multi_threshold_grid': MULTI_THRESHOLDS,
-    'structured_feature_set': STRUCTURED_FEATURE_SET
+    'structured_feature_set': STRUCTURED_FEATURE_SET,
+    'final_linear_model_default': FINAL_LINEAR_MODEL_DEFAULT
 }
 
 
@@ -365,6 +388,7 @@ def build_single_manifest_entry(result, locked_select_baseline, locked_holdout_b
         'input_path': result.get('input_path'),
         'text_sidecar_path': result.get('text_sidecar_path'),
         'selected_family': result.get('selected_family'),
+        'final_linear_model': result.get('final_linear_model'),
         'screen_fusion_weight': result.get('screen_fusion_weight'),
         'select_metrics': result.get('select_metrics'),
         'locked_select_baseline': locked_select_baseline,
@@ -391,6 +415,7 @@ def build_multi_manifest_entry(result, locked_select_baseline, locked_holdout_ba
         'input_path': result.get('input_path'),
         'text_sidecar_path': result.get('text_sidecar_path'),
         'selected_family': result.get('selected_family'),
+        'final_linear_model': result.get('final_linear_model'),
         'screen_fusion_weight': result.get('screen_fusion_weight'),
         'select_metrics': result.get('select_metrics'),
         'locked_select_baseline': locked_select_baseline,
@@ -529,9 +554,17 @@ def transform_text_matrix(vectorizers, text_series):
     ).astype(np.float32)
 
 
+def log1p_clip_nonnegative(values):
+    array = np.asarray(values, dtype=np.float64)
+    array = np.nan_to_num(array, nan=0.0, posinf=0.0, neginf=0.0)
+    return np.log1p(np.clip(array, a_min=0.0, a_max=None))
+
+
 def build_structured_preprocessor(feature_info):
     cat_cols = list(feature_info['cat_cols'])
     num_cols = list(feature_info['num_cols'] + feature_info['flag_cols'])
+    log_num_cols = [col for col in num_cols if col in LOG_SCALED_NUMERIC_COLS]
+    linear_num_cols = [col for col in num_cols if col not in LOG_SCALED_NUMERIC_COLS]
 
     cat_pipe = Pipeline(
         [
@@ -545,29 +578,47 @@ def build_structured_preprocessor(feature_info):
             )
         ]
     )
-    num_pipe = Pipeline(
-        [
-            ('imputer', SimpleImputer(strategy='median')),
-            ('scaler', StandardScaler(with_mean=False))
-        ]
-    )
-    return ColumnTransformer(
-        [
-            ('cat', cat_pipe, cat_cols),
-            ('num', num_pipe, num_cols)
-        ],
-        sparse_threshold=1.0
-    )
+    transformers = [('cat', cat_pipe, cat_cols)]
+
+    if linear_num_cols:
+        linear_num_pipe = Pipeline(
+            [
+                ('imputer', SimpleImputer(strategy='median')),
+                ('scaler', StandardScaler(with_mean=False))
+            ]
+        )
+        transformers.append(('num', linear_num_pipe, linear_num_cols))
+
+    if log_num_cols:
+        log_num_pipe = Pipeline(
+            [
+                ('imputer', SimpleImputer(strategy='median')),
+                (
+                    'log1p',
+                    FunctionTransformer(
+                        log1p_clip_nonnegative,
+                        feature_names_out='one-to-one'
+                    )
+                ),
+                ('scaler', StandardScaler(with_mean=False))
+            ]
+        )
+        transformers.append(('num_log', log_num_pipe, log_num_cols))
+
+    return ColumnTransformer(transformers, sparse_threshold=1.0)
 
 
-def combine_matrices(text_matrix, structured_matrix):
-    return sparse.hstack(
+def combine_matrices(text_matrix, structured_matrix, row_normalize=False):
+    combined = sparse.hstack(
         [
             text_matrix,
             structured_matrix
         ],
         format='csr'
     ).astype(np.float32)
+    if row_normalize:
+        combined = normalize(combined, norm='l2', copy=False)
+    return combined
 
 
 def build_single_screen_model():
@@ -581,14 +632,30 @@ def build_single_screen_model():
     )
 
 
-def build_single_final_model():
-    return LogisticRegression(
-        solver='saga',
-        C=1.0,
-        max_iter=3000,
-        class_weight='balanced',
-        random_state=settings.RANDOM_SEED
-    )
+def build_single_final_model(model_kind=FINAL_LINEAR_MODEL_DEFAULT):
+    if model_kind == 'sgd':
+        return SGDClassifier(
+            loss='log_loss',
+            penalty='l2',
+            alpha=FINAL_SGD_ALPHA,
+            max_iter=FINAL_SGD_MAX_ITER,
+            tol=FINAL_SGD_TOL,
+            class_weight='balanced',
+            average=True,
+            early_stopping=True,
+            validation_fraction=FINAL_SGD_VALIDATION_FRACTION,
+            n_iter_no_change=FINAL_SGD_N_ITER_NO_CHANGE,
+            random_state=settings.RANDOM_SEED
+        )
+    if model_kind == 'logreg':
+        return LogisticRegression(
+            solver='saga',
+            C=1.0,
+            max_iter=3000,
+            class_weight='balanced',
+            random_state=settings.RANDOM_SEED
+        )
+    raise ValueError(f'Unsupported final linear model: {model_kind}')
 
 
 def build_multi_screen_model():
@@ -605,21 +672,37 @@ def build_multi_screen_model():
     )
 
 
-def build_multi_final_model():
-    return OneVsRestClassifier(
-        LogisticRegression(
+def build_multi_final_model(model_kind=FINAL_LINEAR_MODEL_DEFAULT):
+    if model_kind == 'sgd':
+        estimator = SGDClassifier(
+            loss='log_loss',
+            penalty='l2',
+            alpha=FINAL_SGD_ALPHA,
+            max_iter=FINAL_SGD_MAX_ITER,
+            tol=FINAL_SGD_TOL,
+            class_weight='balanced',
+            average=True,
+            early_stopping=True,
+            validation_fraction=FINAL_SGD_VALIDATION_FRACTION,
+            n_iter_no_change=FINAL_SGD_N_ITER_NO_CHANGE,
+            random_state=settings.RANDOM_SEED
+        )
+    elif model_kind == 'logreg':
+        estimator = LogisticRegression(
             solver='saga',
             C=1.0,
             max_iter=3000,
             class_weight='balanced',
             random_state=settings.RANDOM_SEED
-        ),
-        n_jobs=OVR_N_JOBS
-    )
+        )
+    else:
+        raise ValueError(f'Unsupported final linear model: {model_kind}')
+
+    return OneVsRestClassifier(estimator, n_jobs=OVR_N_JOBS)
 
 
-def fit_single_linear(train_matrix, y_train, eval_matrix, final_model=False):
-    model = build_single_final_model() if final_model else build_single_screen_model()
+def fit_single_linear(train_matrix, y_train, eval_matrix, final_model=False, final_model_kind=FINAL_LINEAR_MODEL_DEFAULT):
+    model = build_single_final_model(final_model_kind) if final_model else build_single_screen_model()
     start = perf_counter()
     model.fit(train_matrix, y_train)
     fit_seconds = round(perf_counter() - start, 2)
@@ -632,8 +715,8 @@ def fit_single_linear(train_matrix, y_train, eval_matrix, final_model=False):
     }
 
 
-def fit_multi_linear(train_matrix, y_train, eval_matrix, final_model=False):
-    model = build_multi_final_model() if final_model else build_multi_screen_model()
+def fit_multi_linear(train_matrix, y_train, eval_matrix, final_model=False, final_model_kind=FINAL_LINEAR_MODEL_DEFAULT):
+    model = build_multi_final_model(final_model_kind) if final_model else build_multi_screen_model()
     start = perf_counter()
     model.fit(train_matrix, y_train)
     fit_seconds = round(perf_counter() - start, 2)
@@ -671,13 +754,20 @@ def ensure_finite_matrix(name, matrix):
     return matrix
 
 
+def prefer_decision_function_path(model):
+    if isinstance(model, SGDClassifier):
+        return True
+    return isinstance(model, OneVsRestClassifier) and isinstance(getattr(model, 'estimator', None), SGDClassifier)
+
+
 def safe_single_predict_proba(model, matrix):
-    try:
-        proba = model.predict_proba(matrix)
-        if np.isfinite(proba).all():
-            return np.asarray(proba, dtype=np.float64)
-    except Exception:
-        pass
+    if not prefer_decision_function_path(model):
+        try:
+            proba = model.predict_proba(matrix)
+            if np.isfinite(proba).all():
+                return np.asarray(proba, dtype=np.float64)
+        except Exception:
+            pass
 
     decision = model.decision_function(matrix)
     decision = np.asarray(decision)
@@ -690,12 +780,13 @@ def safe_single_predict_proba(model, matrix):
 
 
 def safe_multi_predict_proba(model, matrix):
-    try:
-        proba = model.predict_proba(matrix)
-        if np.isfinite(proba).all():
-            return np.asarray(proba, dtype=np.float64)
-    except Exception:
-        pass
+    if not prefer_decision_function_path(model):
+        try:
+            proba = model.predict_proba(matrix)
+            if np.isfinite(proba).all():
+                return np.asarray(proba, dtype=np.float64)
+        except Exception:
+            pass
 
     decision = model.decision_function(matrix)
     proba = stable_sigmoid(decision)
@@ -870,7 +961,7 @@ def build_multi_row(task_name, family_name, input_path, text_sidecar_path, stage
     }
 
 
-def fit_single_text_family(train_df, eval_df, structured_feature_info, family_name, final_model=False):
+def fit_single_text_family(train_df, eval_df, structured_feature_info, family_name, final_model=False, final_model_kind=FINAL_LINEAR_MODEL_DEFAULT):
     text_vectorizers = fit_text_vectorizers(train_df['cdescr_model_text'])
     X_train_text = transform_text_matrix(text_vectorizers, train_df['cdescr_model_text'])
     X_eval_text = transform_text_matrix(text_vectorizers, eval_df['cdescr_model_text'])
@@ -882,8 +973,8 @@ def fit_single_text_family(train_df, eval_df, structured_feature_info, family_na
         preprocessor = build_structured_preprocessor(structured_feature_info)
         X_train_struct = preprocessor.fit_transform(train_df[structured_feature_info['feature_cols']])
         X_eval_struct = preprocessor.transform(eval_df[structured_feature_info['feature_cols']])
-        X_train = combine_matrices(X_train_text, X_train_struct)
-        X_eval = combine_matrices(X_eval_text, X_eval_struct)
+        X_train = combine_matrices(X_train_text, X_train_struct, row_normalize=True)
+        X_eval = combine_matrices(X_eval_text, X_eval_struct, row_normalize=True)
     else:
         raise ValueError(f'Unsupported single text family: {family_name}')
 
@@ -891,7 +982,8 @@ def fit_single_text_family(train_df, eval_df, structured_feature_info, family_na
         X_train,
         train_df[TARGET_COL].astype(str),
         X_eval,
-        final_model=final_model
+        final_model=final_model,
+        final_model_kind=final_model_kind
     )
     pred, metrics = score_multiclass_from_proba(
         eval_df[TARGET_COL].astype(str),
@@ -976,7 +1068,7 @@ def check_unseen_multilabel_labels(train_labels, eval_labels, split_name):
         raise ValueError(f'{split_name} has unseen target labels: {unseen_text}')
 
 
-def fit_multi_text_family(train_df, eval_df, structured_feature_info, family_name, final_model=False):
+def fit_multi_text_family(train_df, eval_df, structured_feature_info, family_name, final_model=False, final_model_kind=FINAL_LINEAR_MODEL_DEFAULT):
     train_labels = parse_pipe_labels(train_df[MULTI_TARGET_COL])
     eval_labels = parse_pipe_labels(eval_df[MULTI_TARGET_COL])
     check_unseen_multilabel_labels(train_labels, eval_labels, family_name)
@@ -993,8 +1085,8 @@ def fit_multi_text_family(train_df, eval_df, structured_feature_info, family_nam
         preprocessor = build_structured_preprocessor(structured_feature_info)
         X_train_struct = preprocessor.fit_transform(train_df[structured_feature_info['feature_cols']])
         X_eval_struct = preprocessor.transform(eval_df[structured_feature_info['feature_cols']])
-        X_train = combine_matrices(X_train_text, X_train_struct)
-        X_eval = combine_matrices(X_eval_text, X_eval_struct)
+        X_train = combine_matrices(X_train_text, X_train_struct, row_normalize=True)
+        X_eval = combine_matrices(X_eval_text, X_eval_struct, row_normalize=True)
     else:
         raise ValueError(f'Unsupported multi text family: {family_name}')
 
@@ -1002,7 +1094,8 @@ def fit_multi_text_family(train_df, eval_df, structured_feature_info, family_nam
         X_train,
         y_train,
         X_eval,
-        final_model=final_model
+        final_model=final_model,
+        final_model_kind=final_model_kind
     )
     threshold_choice = select_multilabel_threshold(
         y_eval,
@@ -1176,7 +1269,8 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
 
     log_line(
         f'[single] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
-        f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,}'
+        f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,} '
+        f'final_linear_model={args.final_linear_model}'
     )
 
     def emit_checkpoint(checkpoint_stage, selected_family=None, select_metrics=None, select_gate_pass=None, promotion_status='running'):
@@ -1195,6 +1289,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 'confusion_df': confusion_df,
                 'calibration_df': calibration_df,
                 'selected_family': selected_family,
+                'final_linear_model': args.final_linear_model,
                 'screen_fusion_weight': late_screen['selected_text_weight'] if 'late_screen' in locals() else None,
                 'select_metrics': select_metrics,
                 'select_gate_pass': select_gate_pass,
@@ -1252,27 +1347,30 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     screen_rows.append(text_only_screen_row)
     log_single_family('screen_2024', TEXT_ONLY_FAMILY, text_only_screen_row)
 
-    text_plus_screen = fit_single_text_family(
-        train_core_df,
-        screen_df,
-        structured_feature_info,
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        final_model=False
-    )
-    text_plus_screen_row = build_single_row(
-        'single_label',
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        input_path,
-        text_sidecar_path,
-        'screen_2024',
-        'screen_2024',
-        screen_df[TARGET_COL].astype(str),
-        text_plus_screen['eval_proba'],
-        text_plus_screen['classes'],
-        fit_seconds=text_plus_screen['fit_seconds']
-    )
-    screen_rows.append(text_plus_screen_row)
-    log_single_family('screen_2024', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
+    if args.skip_text_plus:
+        log_line('[single] screen_2024 text_plus_structured_linear skipped by flag')
+    else:
+        text_plus_screen = fit_single_text_family(
+            train_core_df,
+            screen_df,
+            structured_feature_info,
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            final_model=False
+        )
+        text_plus_screen_row = build_single_row(
+            'single_label',
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            input_path,
+            text_sidecar_path,
+            'screen_2024',
+            'screen_2024',
+            screen_df[TARGET_COL].astype(str),
+            text_plus_screen['eval_proba'],
+            text_plus_screen['classes'],
+            fit_seconds=text_plus_screen['fit_seconds']
+        )
+        screen_rows.append(text_plus_screen_row)
+        log_single_family('screen_2024', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
 
     late_screen = select_single_fusion_weight(
         screen_df[TARGET_COL].astype(str),
@@ -1347,27 +1445,30 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     select_rows.append(text_only_select_row)
     log_single_family('select_2025', TEXT_ONLY_FAMILY, text_only_select_row)
 
-    text_plus_select = fit_single_text_family(
-        dev_screen_df,
-        select_df,
-        structured_feature_info,
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        final_model=False
-    )
-    text_plus_select_row = build_single_row(
-        'single_label',
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        input_path,
-        text_sidecar_path,
-        'select_2025',
-        'select_2025',
-        select_df[TARGET_COL].astype(str),
-        text_plus_select['eval_proba'],
-        text_plus_select['classes'],
-        fit_seconds=text_plus_select['fit_seconds']
-    )
-    select_rows.append(text_plus_select_row)
-    log_single_family('select_2025', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
+    if args.skip_text_plus:
+        log_line('[single] select_2025 text_plus_structured_linear skipped by flag')
+    else:
+        text_plus_select = fit_single_text_family(
+            dev_screen_df,
+            select_df,
+            structured_feature_info,
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            final_model=False
+        )
+        text_plus_select_row = build_single_row(
+            'single_label',
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            input_path,
+            text_sidecar_path,
+            'select_2025',
+            'select_2025',
+            select_df[TARGET_COL].astype(str),
+            text_plus_select['eval_proba'],
+            text_plus_select['classes'],
+            fit_seconds=text_plus_select['fit_seconds']
+        )
+        select_rows.append(text_plus_select_row)
+        log_single_family('select_2025', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
 
     late_select = apply_single_fusion_weight(
         select_df[TARGET_COL].astype(str),
@@ -1403,6 +1504,12 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     select_improvement = float(current_best_row['macro_f1'] - locked_single_select_row['macro_f1'])
     select_gate_pass = select_improvement >= SINGLE_PROMOTE_SELECT_DELTA
     promotion_status = 'rejected_select'
+    log_line(
+        f'[single] select_2025 best={selected_family} '
+        f'macro_f1={float(current_best_row["macro_f1"]):.4f} '
+        f'delta_vs_locked={select_improvement:+.4f} '
+        f'gate_pass={str(select_gate_pass).lower()}'
+    )
     completed_stages.append('select_2025')
     emit_checkpoint(
         'select_2025_complete',
@@ -1413,7 +1520,19 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     )
 
     if select_gate_pass:
+        log_line(f'[single] holdout_2026 start family={selected_family}')
+        emit_checkpoint(
+            'holdout_2026_started',
+            selected_family=selected_family,
+            select_metrics=current_best_row,
+            select_gate_pass=select_gate_pass,
+            promotion_status='running'
+        )
         if selected_family == STRUCTURED_FAMILY:
+            log_line(
+                f'[single] holdout_2026 fitting structured carry-forward '
+                f'iteration={int(structured_select["selected_iteration"])}'
+            )
             holdout_result = fit_single_structured_holdout(
                 dev_select_df,
                 holdout_df,
@@ -1423,6 +1542,10 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 task_type=str(args.task_type).upper(),
                 devices=args.devices,
                 random_seed=args.random_seed
+            )
+            log_line(
+                f'[single] holdout_2026 structured fit complete '
+                f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
             holdout_row = build_single_row(
                 'single_label',
@@ -1438,12 +1561,22 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 selected_iteration=structured_select['selected_iteration']
             )
         elif selected_family == TEXT_ONLY_FAMILY:
+            log_line(
+                f'[single] holdout_2026 fitting final text-only linear model '
+                f'dev_rows={len(dev_select_df):,} '
+                f'final_model={args.final_linear_model}'
+            )
             holdout_result = fit_single_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
                 TEXT_ONLY_FAMILY,
-                final_model=True
+                final_model=True,
+                final_model_kind=args.final_linear_model
+            )
+            log_line(
+                f'[single] holdout_2026 text-only fit complete '
+                f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
             holdout_result = {
                 'fit_seconds': holdout_result['fit_seconds'],
@@ -1464,12 +1597,22 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 fit_seconds=holdout_result['fit_seconds']
             )
         elif selected_family == TEXT_PLUS_STRUCTURED_FAMILY:
+            log_line(
+                f'[single] holdout_2026 fitting final text+structured linear model '
+                f'dev_rows={len(dev_select_df):,} '
+                f'final_model={args.final_linear_model}'
+            )
             holdout_result = fit_single_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
                 TEXT_PLUS_STRUCTURED_FAMILY,
-                final_model=True
+                final_model=True,
+                final_model_kind=args.final_linear_model
+            )
+            log_line(
+                f'[single] holdout_2026 text+structured fit complete '
+                f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
             holdout_result = {
                 'fit_seconds': holdout_result['fit_seconds'],
@@ -1490,6 +1633,10 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 fit_seconds=holdout_result['fit_seconds']
             )
         else:
+            log_line(
+                f'[single] holdout_2026 fitting late-fusion structured branch '
+                f'iteration={int(structured_select["selected_iteration"])}'
+            )
             structured_holdout = fit_single_structured_holdout(
                 dev_select_df,
                 holdout_df,
@@ -1500,12 +1647,27 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 devices=args.devices,
                 random_seed=args.random_seed
             )
+            log_line(
+                f'[single] holdout_2026 structured branch complete '
+                f'fit_seconds={float(structured_holdout["fit_seconds"]):.2f}'
+            )
+            log_line(
+                f'[single] holdout_2026 fitting late-fusion text branch '
+                f'text_weight={float(late_screen["selected_text_weight"]):.2f} '
+                f'dev_rows={len(dev_select_df):,} '
+                f'final_model={args.final_linear_model}'
+            )
             text_holdout = fit_single_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
                 TEXT_ONLY_FAMILY,
-                final_model=True
+                final_model=True,
+                final_model_kind=args.final_linear_model
+            )
+            log_line(
+                f'[single] holdout_2026 text branch complete '
+                f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
             late_holdout = apply_single_fusion_weight(
                 holdout_df[TARGET_COL].astype(str),
@@ -1537,6 +1699,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             )
 
         holdout_rows.append(holdout_row)
+        log_single_family('holdout_2026', selected_family, holdout_row)
         class_df = build_multiclass_class_df(
             holdout_df[TARGET_COL].astype(str),
             holdout_result['pred'],
@@ -1586,6 +1749,12 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             and holdout_top3_ok
             and holdout_ece_ok
         ) else 'rejected_holdout'
+        log_line(
+            f'[single] holdout_2026 promotion_status={promotion_status} '
+            f'macro_gain={holdout_macro_gain:+.4f} '
+            f'top3_ok={str(bool(holdout_top3_ok)).lower()} '
+            f'ece_delta={(holdout_ece - locked_single_ece):+.4f}'
+        )
         completed_stages.append('holdout_2026')
         emit_checkpoint(
             'holdout_2026_complete',
@@ -1595,6 +1764,10 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             promotion_status=promotion_status
         )
     else:
+        log_line(
+            f'[single] select_2025 gate rejected; skipping holdout '
+            f'family={selected_family}'
+        )
         emit_checkpoint(
             'select_gate_rejected',
             selected_family=selected_family,
@@ -1614,6 +1787,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         'confusion_df': confusion_df,
         'calibration_df': calibration_df,
         'selected_family': selected_family,
+        'final_linear_model': args.final_linear_model,
         'screen_fusion_weight': late_screen['selected_text_weight'],
         'select_metrics': current_best_row,
         'select_gate_pass': select_gate_pass,
@@ -1650,7 +1824,8 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
 
     log_line(
         f'[multi] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
-        f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,}'
+        f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,} '
+        f'final_linear_model={args.final_linear_model}'
     )
 
     def emit_checkpoint(checkpoint_stage, selected_family=None, select_metrics=None, select_gate_pass=None, promotion_status='running'):
@@ -1667,6 +1842,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_multi_holdout_df(),
                 'label_df': label_df,
                 'selected_family': selected_family,
+                'final_linear_model': args.final_linear_model,
                 'screen_fusion_weight': late_screen['selected_text_weight'] if 'late_screen' in locals() else None,
                 'select_metrics': select_metrics,
                 'select_gate_pass': select_gate_pass,
@@ -1726,28 +1902,31 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     screen_rows.append(text_only_screen_row)
     log_multi_family('screen_2024', TEXT_ONLY_FAMILY, text_only_screen_row)
 
-    text_plus_screen = fit_multi_text_family(
-        train_core_df,
-        screen_df,
-        structured_feature_info,
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        final_model=False
-    )
-    text_plus_screen_row = build_multi_row(
-        'multi_label',
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        input_path,
-        text_sidecar_path,
-        'screen_2024',
-        'screen_2024',
-        text_plus_screen['y_eval'],
-        text_plus_screen['pred'],
-        text_plus_screen['eval_proba'],
-        threshold=text_plus_screen['threshold_choice']['threshold'],
-        fit_seconds=text_plus_screen['fit_seconds']
-    )
-    screen_rows.append(text_plus_screen_row)
-    log_multi_family('screen_2024', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
+    if args.skip_text_plus:
+        log_line('[multi] screen_2024 text_plus_structured_linear skipped by flag')
+    else:
+        text_plus_screen = fit_multi_text_family(
+            train_core_df,
+            screen_df,
+            structured_feature_info,
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            final_model=False
+        )
+        text_plus_screen_row = build_multi_row(
+            'multi_label',
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            input_path,
+            text_sidecar_path,
+            'screen_2024',
+            'screen_2024',
+            text_plus_screen['y_eval'],
+            text_plus_screen['pred'],
+            text_plus_screen['eval_proba'],
+            threshold=text_plus_screen['threshold_choice']['threshold'],
+            fit_seconds=text_plus_screen['fit_seconds']
+        )
+        screen_rows.append(text_plus_screen_row)
+        log_multi_family('screen_2024', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
 
     late_screen = select_multi_fusion_weight(
         structured_screen['y_eval'],
@@ -1823,28 +2002,31 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     select_rows.append(text_only_select_row)
     log_multi_family('select_2025', TEXT_ONLY_FAMILY, text_only_select_row)
 
-    text_plus_select = fit_multi_text_family(
-        dev_screen_df,
-        select_df,
-        structured_feature_info,
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        final_model=False
-    )
-    text_plus_select_row = build_multi_row(
-        'multi_label',
-        TEXT_PLUS_STRUCTURED_FAMILY,
-        input_path,
-        text_sidecar_path,
-        'select_2025',
-        'select_2025',
-        text_plus_select['y_eval'],
-        text_plus_select['pred'],
-        text_plus_select['eval_proba'],
-        threshold=text_plus_select['threshold_choice']['threshold'],
-        fit_seconds=text_plus_select['fit_seconds']
-    )
-    select_rows.append(text_plus_select_row)
-    log_multi_family('select_2025', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
+    if args.skip_text_plus:
+        log_line('[multi] select_2025 text_plus_structured_linear skipped by flag')
+    else:
+        text_plus_select = fit_multi_text_family(
+            dev_screen_df,
+            select_df,
+            structured_feature_info,
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            final_model=False
+        )
+        text_plus_select_row = build_multi_row(
+            'multi_label',
+            TEXT_PLUS_STRUCTURED_FAMILY,
+            input_path,
+            text_sidecar_path,
+            'select_2025',
+            'select_2025',
+            text_plus_select['y_eval'],
+            text_plus_select['pred'],
+            text_plus_select['eval_proba'],
+            threshold=text_plus_select['threshold_choice']['threshold'],
+            fit_seconds=text_plus_select['fit_seconds']
+        )
+        select_rows.append(text_plus_select_row)
+        log_multi_family('select_2025', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
 
     late_select = apply_multi_fusion_weight(
         structured_select['y_eval'],
@@ -1879,6 +2061,12 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     select_improvement = float(current_best_row['macro_f1'] - locked_multi_select_row['macro_f1'])
     select_gate_pass = select_improvement >= MULTI_PROMOTE_SELECT_DELTA
     promotion_status = 'rejected_select'
+    log_line(
+        f'[multi] select_2025 best={selected_family} '
+        f'macro_f1={float(current_best_row["macro_f1"]):.4f} '
+        f'delta_vs_locked={select_improvement:+.4f} '
+        f'gate_pass={str(select_gate_pass).lower()}'
+    )
     completed_stages.append('select_2025')
     emit_checkpoint(
         'select_2025_complete',
@@ -1889,7 +2077,20 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     )
 
     if select_gate_pass:
+        log_line(f'[multi] holdout_2026 start family={selected_family}')
+        emit_checkpoint(
+            'holdout_2026_started',
+            selected_family=selected_family,
+            select_metrics=current_best_row,
+            select_gate_pass=select_gate_pass,
+            promotion_status='running'
+        )
         if selected_family == STRUCTURED_FAMILY:
+            log_line(
+                f'[multi] holdout_2026 fitting structured carry-forward '
+                f'iteration={int(structured_select["selected_iteration"])} '
+                f'threshold={float(structured_select["selected_threshold"]):.3f}'
+            )
             holdout_result = fit_multi_structured_holdout(
                 dev_select_df,
                 holdout_df,
@@ -1897,6 +2098,10 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 structured_select,
                 devices=args.devices,
                 random_seed=args.random_seed
+            )
+            log_line(
+                f'[multi] holdout_2026 structured fit complete '
+                f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
             y_holdout = holdout_result['y_holdout']
             holdout_pred = holdout_result['holdout_pred']
@@ -1917,12 +2122,22 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             )
             mlb = holdout_result['mlb']
         elif selected_family == TEXT_ONLY_FAMILY:
+            log_line(
+                f'[multi] holdout_2026 fitting final text-only linear model '
+                f'dev_rows={len(dev_select_df):,} '
+                f'final_model={args.final_linear_model}'
+            )
             text_holdout = fit_multi_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
                 TEXT_ONLY_FAMILY,
-                final_model=True
+                final_model=True,
+                final_model_kind=args.final_linear_model
+            )
+            log_line(
+                f'[multi] holdout_2026 text-only fit complete '
+                f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
             y_holdout = text_holdout['y_eval']
             holdout_proba = text_holdout['eval_proba']
@@ -1946,12 +2161,22 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             )
             mlb = text_holdout['mlb']
         elif selected_family == TEXT_PLUS_STRUCTURED_FAMILY:
+            log_line(
+                f'[multi] holdout_2026 fitting final text+structured linear model '
+                f'dev_rows={len(dev_select_df):,} '
+                f'final_model={args.final_linear_model}'
+            )
             text_holdout = fit_multi_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
                 TEXT_PLUS_STRUCTURED_FAMILY,
-                final_model=True
+                final_model=True,
+                final_model_kind=args.final_linear_model
+            )
+            log_line(
+                f'[multi] holdout_2026 text+structured fit complete '
+                f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
             y_holdout = text_holdout['y_eval']
             holdout_proba = text_holdout['eval_proba']
@@ -1975,6 +2200,11 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             )
             mlb = text_holdout['mlb']
         else:
+            log_line(
+                f'[multi] holdout_2026 fitting late-fusion structured branch '
+                f'iteration={int(structured_select["selected_iteration"])} '
+                f'text_weight={float(late_screen["selected_text_weight"]):.2f}'
+            )
             structured_holdout = fit_multi_structured_holdout(
                 dev_select_df,
                 holdout_df,
@@ -1983,12 +2213,26 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 devices=args.devices,
                 random_seed=args.random_seed
             )
+            log_line(
+                f'[multi] holdout_2026 structured branch complete '
+                f'fit_seconds={float(structured_holdout["fit_seconds"]):.2f}'
+            )
+            log_line(
+                f'[multi] holdout_2026 fitting late-fusion text branch '
+                f'dev_rows={len(dev_select_df):,} '
+                f'final_model={args.final_linear_model}'
+            )
             text_holdout = fit_multi_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
                 TEXT_ONLY_FAMILY,
-                final_model=True
+                final_model=True,
+                final_model_kind=args.final_linear_model
+            )
+            log_line(
+                f'[multi] holdout_2026 text branch complete '
+                f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
             y_holdout = text_holdout['y_eval']
             holdout_proba = (
@@ -2018,6 +2262,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             mlb = text_holdout['mlb']
 
         holdout_rows.append(holdout_row)
+        log_multi_family('holdout_2026', selected_family, holdout_row)
         precision, recall, f1, support = precision_recall_fscore_support(
             y_holdout,
             holdout_pred,
@@ -2057,6 +2302,13 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             and holdout_row['recall_at_3'] >= locked_holdout['recall_at_3']
             and holdout_row['label_coverage'] >= MULTI_LABEL_COVERAGE_FLOOR
         ) else 'rejected_holdout'
+        log_line(
+            f'[multi] holdout_2026 promotion_status={promotion_status} '
+            f'macro_gain={macro_gain:+.4f} '
+            f'micro_gain={micro_gain:+.4f} '
+            f'recall3_ok={str(holdout_row["recall_at_3"] >= locked_holdout["recall_at_3"]).lower()} '
+            f'label_coverage={float(holdout_row["label_coverage"]):.4f}'
+        )
         completed_stages.append('holdout_2026')
         emit_checkpoint(
             'holdout_2026_complete',
@@ -2066,6 +2318,10 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             promotion_status=promotion_status
         )
     else:
+        log_line(
+            f'[multi] select_2025 gate rejected; skipping holdout '
+            f'family={selected_family}'
+        )
         emit_checkpoint(
             'select_gate_rejected',
             selected_family=selected_family,
@@ -2083,6 +2339,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_multi_holdout_df(),
         'label_df': label_df,
         'selected_family': selected_family,
+        'final_linear_model': args.final_linear_model,
         'screen_fusion_weight': late_screen['selected_text_weight'],
         'select_metrics': current_best_row,
         'select_gate_pass': select_gate_pass,
@@ -2121,6 +2378,17 @@ def parse_args():
     parser.add_argument('--text-sidecar-path', default=None)
     parser.add_argument('--skip-single', action='store_true')
     parser.add_argument('--skip-multi', action='store_true')
+    parser.add_argument(
+        '--skip-text-plus',
+        action='store_true',
+        help='Skip the early-fusion text_plus_structured_linear family'
+    )
+    parser.add_argument(
+        '--final-linear-model',
+        choices=FINAL_LINEAR_MODEL_CHOICES,
+        default=FINAL_LINEAR_MODEL_DEFAULT,
+        help='Final refit estimator for promoted text families'
+    )
     return parser.parse_args()
 
 
@@ -2146,6 +2414,7 @@ def main():
         'public_benchmark_locked': True,
         'run_status': 'running',
         'structured_companion_feature_set': STRUCTURED_FEATURE_SET,
+        'final_linear_model': args.final_linear_model,
         'text_config': TEXT_CONFIG,
         'runtime': runtime_manifest(),
         'code_version': {
