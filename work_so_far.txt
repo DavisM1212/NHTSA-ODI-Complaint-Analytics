@@ -1,0 +1,330 @@
+1. Repo And Data Overview
+
+This repo was set up as a reproducible data science workflow for NHTSA ODI consumer complaints analysis. The raw complaint zip files
+are kept immutable in `data/raw`, then processed into pandas-friendly tables and task-specific modeling tables. The current work is
+based on ODI complaints covering 2020 through early 2026, with a vehicle-focused first pass because vehicle complaints make up almost
+all of the usable modeling cohort.
+
+
+2. What Was Looked At In EDA (EDA.ipynb)
+
+The EDA notebook was used to understand the structure of the complaint data before cleaning. We looked at nulls, sparsity, duplicates,
+date ranges, formatting issues, outliers, and missingness by product type.
+
+Main takeaways:
+- the raw complaint files did not include headers, so ingestion had to be patched using the source schema
+- `cmplid` behaves like the row level primary key, while `odino` is better treated as the complaint/case id
+- much of the missingness is structural and depends on `prod_type`, not just bad data
+- several fields contained sentinel or suspicious values such as `yeartxt = 9999`, `veh_speed = 999`, unusual state codes, and
+  inconsistent text formatting
+- component labels were fragmented and needed grouping before modeling
+- the vehicle cohort was large enough to justify a vehicle-first modeling path
+
+
+3. What Was Done For Cleaning (Cleaning.ipynb)
+
+The cleaning notebook was built around multiple layered data frames so we could inspect changes before locking them into the
+pipeline. We used `docs/CMPL.txt` as the source contract for field meanings, types, and known file changes over time.
+
+Main cleaning steps:
+- standardized text formatting and core dtypes
+- created issue flags before making stronger cleaning decisions
+- reviewed date, speed, mileage, and zero value behavior in context instead of applying generic rules
+- chose `ldate` (date complaint received) as the main modeling time anchor
+- kept raw dates, but marked `faildate` as untrusted when it was clearly incompatible with the receipt date or model year (i.e. the
+  fail date was after the complaint receipt date or before the model year)
+- converted high confidence sentinel values to missing, such as unknown model years and `veh_speed = 999`
+- validated state codes and other structural fields
+- built a reviewed component target by grouping the component labels into clean parent component categories
+- removed obvious non-vehicle spillover, dropped `UNKNOWN OR OTHER`, dropped equipment-only groups, and removed very rare component
+  groups
+
+Final cleaning choices:
+- keep the master cleaned complaint table conservative and auditable
+- focus structured modeling on `prod_type = 'V'`
+- collapse the component task to a single-label complaint-case table for the first model
+  - some complaints had multiple rows with just the component column changing, had to collapse to one component label
+- keep 22 final component groups
+- keep 252,122 single-label cases, which is 72.81% of the kept complaint cases
+
+
+4. What Was Set Up And Discovered For The Component Model (Component_Modeling.ipynb)
+
+First built simple baselines on a time-aware split:
+- train: 2020 to 2024
+- validation: 2025
+- holdout left untouched (later test date): 2026
+
+We compared a naive baseline that just guessed the most frequent label, a logistic regression baseline, and then a structured CatBoost
+model. Logistic regression showed that the structured fields had real signal, but it was not strong enough to be the main benchmark.
+
+CatBoost was chosen because it handles mixed categorical and numeric data well, works with missing values, and does not require one-hot
+encoding. Local runs were slow to tune, so I moved the heavy CatBoost tuning work to Colab GPU and used Optuna for a focused search.
+
+The evaluation metrics chosen were:
+- top-1 accuracy: proportion of instances where the model's number one most likely prediction matched the true label
+- macro F1: average of the F1 scores for all classes (uses precision and recall to get F1 score per class then averages those)
+- top-3 accuracy: proportion of instance where the true label is among the model's top three predicted classes
+
+Current benchmark result from the tuned CatBoost model:
+- validation top-1 accuracy: 0.3601
+  - naive baseline top-1 accuracy: 0.2598
+  - logreg baseline top-1 accuracy: 0.1899
+- validation macro F1: 0.2420
+  - naive baseline macro F1: 0.0187
+  - logreg baseline macro F1: 0.1461
+- validation top-3 accuracy: 0.5873
+  - naive baseline top-3 accuracy: 0.5295
+  - logreg baseline top-3 accuracy: 0.4158
+
+What we learned from the component model:
+- structured complaint data is clearly useful for component prediction
+- the strongest drivers are vehicle identity and context fields such as model, manufacturer, model year, make, state, speed, lag, and miles
+- some component groups are modeled reasonably well with structured data alone
+- other groups are still weak and are good candidates for later improvement with complaint text, or by reducing the number of categories
+
+At this point, the repo has a cleaned complaint workflow, a reviewed component target, a reproducible component modeling benchmark, and a
+clear foundation for the next stage of work - creating the severity ranking model.
+
+
+5. What Was Found In The Component Pipeline Audit
+
+After the first CatBoost benchmark, we did a deeper audit of the repo against the project proposal, README, `docs/CMPL.txt`, the EDA and
+cleaning notebooks, the cleaning pipeline, component collapse logic, CatBoost tuning, and final component model outputs.
+
+Main audit findings:
+- the original CatBoost benchmark was not using a clean final holdout; tuning and reporting were too centered on the 2025 validation split
+- the README numbers and saved artifact numbers had drifted because some tuning/modeling runs were done in Colab and copied back manually
+- the single-label component setup dropped a large group of multi-label complaints, and those dropped complaints had a higher severity rate
+- `docs/CMPL.txt` documented post-2021 source behavior where prior blanks could appear as `0` or `N`, but the cleaning pipeline did not fully
+  preserve that distinction for model-facing numeric zeros
+- provenance fields such as `source_file` and `source_zip` were being dropped too early, which made schema-drift auditing harder
+- CatBoost tuning and final training were not fully aligned around the same selection/evaluation contract
+- the structured feature set was useful, but limited; the biggest missing signal source was clearly the complaint narrative text
+
+The remediation changed the modeling contract:
+- `valid_2025` became model selection only
+- `holdout_2026` became the official final benchmark split
+- final benchmark manifests, metrics, predictions, calibration outputs, and summary files became the source of truth
+- Colab artifacts became acceptable experiment artifacts, but local repo runs were preferred as canonical whenever practical
+
+
+6. Cleaning, Target, And Baseline Remediation
+
+The cleaning and target pipelines were updated before further modeling:
+- kept `source_file` and `source_zip` in processed complaint tables
+- added `source_era` so pre/post-2021 schema behavior could be audited
+- added `miles_zero_flag` and `veh_speed_zero_flag`
+- treated ambiguous `miles == 0` and `veh_speed == 0` as missing for modeling while preserving the zero flags
+- added a source-era drift report for modeled fields
+- moved rare-label filtering to the final modeling unit instead of filtering only at the raw component-row level
+- kept the single-label table as a scoped benchmark rather than the whole routing problem
+- added a full multi-label component case table keyed by `odino`
+
+The updated target framing showed:
+- 346,590 kept component cases in the multi-label routing universe
+- 251,667 single-label benchmark cases after final single-label filtering
+- 94,429 multi-label-only cases, or 27.25% of the kept component cases
+- multi-label-only cases had a higher broad-severity rate than single-label cases
+- the multi-label share increased in the later years, reaching 31.27% of kept component cases in 2026
+
+The structured single-label benchmark was rerun as an honest holdout benchmark:
+- official structured model: CatBoost
+- feature set: `core_structured`
+- final split: `holdout_2026`
+- holdout rows: 6,995
+- top-1 accuracy: 0.4722
+- macro F1: 0.3319
+- top-3 accuracy: 0.7052
+- calibration ECE: 0.0121
+
+The multi-label benchmark was added for the full kept-case routing problem:
+- official structured model: CatBoost MultiLabel
+- feature set: `core_structured`
+- final split: `holdout_2026`
+- holdout rows: 10,192
+- threshold: 0.20
+- selected iteration: 1200
+- micro F1: 0.4571
+- macro F1: 0.2285
+- recall@3: 0.6751
+- precision@3: 0.3027
+- label coverage: 0.8000
+
+The structured CatBoost multi-label model beat the naive and logistic baselines on holdout and became the official multi-label component
+routing benchmark.
+
+
+7. Structured Feature Wave 1
+
+After the honest structured baselines were locked, we ran a structured-only feature search using a stricter development split:
+- train_core: complaints through 2023
+- screen_2024: complaints in 2024
+- select_2025: complaints in 2025
+- holdout_2026: untouched final benchmark, used only after promotion
+
+New structured feature families were added:
+- incident features such as police report, repaired flag, and severity flags
+- date quality flags such as trusted fail date and pre-model-year fail date checks
+- geo/time features such as complaint year, month, quarter, vehicle age, and state region
+- cohort history features such as prior complaint counts and prior severity shares by manufacturer, make/model, and make/model/year
+
+The best structured-only family for both tasks was:
+- `wave1_incident_cohort_history`
+
+Single-label Wave 1 result:
+- baseline `select_2025` macro F1: 0.2644
+- best Wave 1 `select_2025` macro F1: 0.2712
+- gain: +0.0068
+- promotion rule required +0.010, so the family was not promoted
+
+Multi-label Wave 1 result:
+- baseline `select_2025` macro F1: 0.2011
+- best Wave 1 `select_2025` macro F1: 0.2064
+- gain: +0.0053
+- micro F1 and label coverage also moved in the wrong direction
+- the family was not promoted
+
+What we learned:
+- structured-only signal was close to saturation
+- `wave1_incident_cohort_history` was still the best structured augmentation candidate
+- the next high-payoff feature source was the complaint narrative text rather than more structured-only sweeping
+
+
+8. Text Feature Wave 2
+
+Wave 2 added complaint narrative text from `cdescr` using a sidecar table:
+- `data/processed/odi_component_text_sidecar.parquet`
+
+The sidecar was keyed by `odino` and kept:
+- raw cleaned narrative text
+- model text with whitespace collapsed
+- missing and placeholder flags
+- character and word counts
+- source era
+- complaint receipt date
+
+Text overlap was checked so exact duplicated narratives would not silently drive the results:
+- train_core to screen_2024 row overlap: 1.1770%
+- dev_2020_2024 to select_2025 row overlap: 1.0348%
+- dev_2020_2025 to holdout_2026 row overlap: 0.7071%
+
+The overlap was low enough to keep as a sensitivity diagnostic rather than exclude by default.
+
+Wave 2 used classical sparse text features:
+- word TF-IDF with 1-2 grams
+- character TF-IDF with 3-5 character word-boundary grams
+- no stemming
+- no lemmatization
+- no stop-word removal
+- linear SGD models for text (other models, such as LogReg, had unrealistic fit times)
+- late fusion between text probabilities and the structured CatBoost model
+
+We intentionally did not use transformers, embeddings, or CatBoost text features in this wave.
+
+Single-label Wave 2 result:
+- best family: `text_structured_late_fusion`
+- structured companion: `wave1_incident_cohort_history`
+- text weight: 0.75
+- `select_2025` macro F1: 0.7151
+- `select_2025` top-1 accuracy: 0.8466
+- `select_2025` top-3 accuracy: 0.9455
+- uncalibrated holdout macro F1: about 0.7456 in Colab and 0.7454 locally
+- uncalibrated holdout top-1 accuracy: about 0.8522 to 0.8523
+- uncalibrated holdout top-3 accuracy: about 0.9497 to 0.9500
+
+This was a major quality improvement, but it was initially not promoted because calibration worsened:
+- structured CatBoost holdout ECE: 0.0121
+- uncalibrated text fusion holdout ECE: about 0.1228
+- the model was mostly underconfident, not misranking badly
+
+Multi-label Wave 2 result:
+- best text family: `text_only_linear`
+- `select_2025` macro F1: 0.4652
+- `select_2025` micro F1: 0.7256
+- `select_2025` recall@3: 0.9044
+- holdout macro F1 improved to 0.3150
+- holdout micro F1 fell to 0.3731
+- holdout recall@3 fell to 0.5468
+- holdout precision@3 fell to 0.2293
+
+The multi-label text model improved macro F1 by predicting rare labels more aggressively, but it made the official routing metrics worse.
+Because recall@3 and micro F1 declined, the multi-label text model was not promoted.
+
+
+9. Wave 2b Calibration And Final Component Benchmarks
+
+Wave 2b focused only on calibrating the single-label `text_structured_late_fusion` model. We used a ranking-preserving power calibration
+fit on `select_2025`, then evaluated once on `holdout_2026`.
+
+Final promoted single-label component model:
+- model family: `text_structured_late_fusion`
+- text branch: SGD sparse text model
+- structured branch: CatBoost using `wave1_incident_cohort_history`
+- text weight: 0.75
+- structured selected iteration: 1280
+- calibration method: power calibration
+- calibration source: `select_2025`
+- selected alpha: 1.5
+- canonical run: local repo `.venv`, Python 3.13.12
+
+Final single-label holdout metrics:
+- holdout rows: 6,995
+- top-1 accuracy: 0.8523
+- macro F1: 0.7454
+- top-3 accuracy: 0.9500
+- ECE: 0.0243
+- multiclass Brier score: 0.227377
+
+Improvement over the locked structured CatBoost baseline:
+- macro F1 improved from 0.3319 to 0.7454
+- top-1 accuracy improved from 0.4722 to 0.8523
+- top-3 accuracy improved from 0.7052 to 0.9500
+- ECE stayed inside the promotion threshold, with an allowed ceiling of 0.0321
+
+The local Wave 2b run matched the Colab run closely, so the local run was treated as the canonical artifact. The Colab copies were only
+used as comparison evidence.
+
+Final official component benchmark status:
+- official single-label component model: calibrated Wave 2b `text_structured_late_fusion`
+- official multi-label component routing model: structured CatBoost MultiLabel on `core_structured`
+- official summary artifacts:
+  - `data/outputs/component_official_benchmark_summary.csv`
+  - `data/outputs/component_official_benchmark_summary.json`
+
+Why the final models differ by task:
+- single-label component prediction benefits heavily from narrative text and calibrated late fusion
+- multi-label routing is still better served by the structured CatBoost model because the text model hurt micro F1 and recall@3 on holdout
+
+At this point, the component-model phase is locked. The repo has:
+- schema-aware cleaned complaint data
+- single-label and multi-label component target tables
+- a text sidecar for complaint narratives
+- a calibrated official single-label component model
+- an official structured multi-label routing model
+- README/reporting support that points to the official benchmark manifests and summary artifacts
+
+The next major modeling stage should move back to the original project plan: severity ranking / early-warning modeling. The component model
+work can now serve as a feature source or supporting analysis layer for that severity-focused stage.
+
+
+10. Component Presentation Figures
+
+After the final component models were locked, a reporting utility was added to generate reusable presentation figures from the saved
+component artifacts:
+- script: `src/reporting/component_visuals.py`
+- output folder: `docs/figures/component_models/`
+- figure index: `docs/figures/component_models/component_model_figure_index.csv`
+
+The generated figure set covers:
+- official benchmark metric summary for single-label and multi-label component models
+- single-label lift from structured CatBoost to calibrated text + structured late fusion
+- single-label per-class F1
+- single-label calibration after power scaling
+- single-label major-group confusion heatmap
+- multi-label per-class F1 for the structured CatBoost routing model
+- target-scope framing that compares single-label benchmark cases to multi-label-only cases
+
+The figures can be regenerated with:
+
+`.\.venv\Scripts\python.exe -m src.reporting.component_visuals`

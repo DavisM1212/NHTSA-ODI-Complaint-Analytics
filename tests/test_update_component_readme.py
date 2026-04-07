@@ -3,7 +3,10 @@ import shutil
 import uuid
 from pathlib import Path
 
-from src.reporting.update_component_readme import build_summary_rows, update_component_readme
+from src.reporting.update_component_readme import (
+    build_summary_rows,
+    update_component_readme,
+)
 
 
 def test_update_component_readme_replaces_marker_block():

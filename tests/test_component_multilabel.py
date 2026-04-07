@@ -1,4 +1,7 @@
-from src.modeling.component_multilabel import build_catboost_model, is_retryable_catboost_gpu_error
+from src.modeling.component_multilabel import (
+    build_catboost_model,
+    is_retryable_catboost_gpu_error,
+)
 
 
 def test_is_retryable_catboost_gpu_error_detects_known_cuda_signature():

@@ -1,10 +1,11 @@
 import numpy as np
 import pandas as pd
 from scipy import sparse
-from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.linear_model import SGDClassifier
 from sklearn.multiclass import OneVsRestClassifier
 
 from src.modeling.component_text_wave2 import (
+    FINAL_LINEAR_MODEL_CHOICES,
     FINAL_LINEAR_MODEL_DEFAULT,
     FUSION_TEXT_WEIGHTS,
     MULTI_THRESHOLDS,
@@ -32,6 +33,7 @@ def test_wave2_constants_match_the_locked_plan():
     assert FUSION_TEXT_WEIGHTS == [0.25, 0.50, 0.75]
     assert MULTI_THRESHOLDS == [0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20, 0.225, 0.25, 0.30]
     assert FINAL_LINEAR_MODEL_DEFAULT == 'sgd'
+    assert FINAL_LINEAR_MODEL_CHOICES == ['sgd']
 
 
 def test_merge_text_sidecar_fills_defaults_for_missing_cases():
@@ -223,11 +225,13 @@ def test_combine_matrices_can_row_normalize_sparse_blocks():
 def test_prefer_decision_function_path_targets_sgd_screen_models():
     single = SGDClassifier(loss='log_loss')
     multi = OneVsRestClassifier(SGDClassifier(loss='log_loss'))
-    final_model = LogisticRegression()
+
+    class DummyPredictProbaModel:
+        pass
 
     assert prefer_decision_function_path(single) is True
     assert prefer_decision_function_path(multi) is True
-    assert prefer_decision_function_path(final_model) is False
+    assert prefer_decision_function_path(DummyPredictProbaModel()) is False
 
 
 def test_safe_single_predict_proba_falls_back_to_decision_scores():

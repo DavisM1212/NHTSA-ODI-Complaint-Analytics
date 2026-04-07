@@ -10,7 +10,7 @@ from scipy import sparse
 from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import Pipeline
@@ -142,7 +142,7 @@ MULTI_PROMOTE_HOLDOUT_MACRO_DELTA = 0.015
 MULTI_PROMOTE_HOLDOUT_MICRO_DELTA = 0.010
 MULTI_LABEL_COVERAGE_FLOOR = 0.80
 FINAL_LINEAR_MODEL_DEFAULT = 'sgd'
-FINAL_LINEAR_MODEL_CHOICES = ['sgd', 'logreg']
+FINAL_LINEAR_MODEL_CHOICES = ['sgd']
 FINAL_SGD_ALPHA = 1e-6
 FINAL_SGD_MAX_ITER = 4000
 FINAL_SGD_TOL = 1e-4
@@ -647,14 +647,6 @@ def build_single_final_model(model_kind=FINAL_LINEAR_MODEL_DEFAULT):
             n_iter_no_change=FINAL_SGD_N_ITER_NO_CHANGE,
             random_state=settings.RANDOM_SEED
         )
-    if model_kind == 'logreg':
-        return LogisticRegression(
-            solver='saga',
-            C=1.0,
-            max_iter=3000,
-            class_weight='balanced',
-            random_state=settings.RANDOM_SEED
-        )
     raise ValueError(f'Unsupported final linear model: {model_kind}')
 
 
@@ -685,14 +677,6 @@ def build_multi_final_model(model_kind=FINAL_LINEAR_MODEL_DEFAULT):
             early_stopping=True,
             validation_fraction=FINAL_SGD_VALIDATION_FRACTION,
             n_iter_no_change=FINAL_SGD_N_ITER_NO_CHANGE,
-            random_state=settings.RANDOM_SEED
-        )
-    elif model_kind == 'logreg':
-        estimator = LogisticRegression(
-            solver='saga',
-            C=1.0,
-            max_iter=3000,
-            class_weight='balanced',
             random_state=settings.RANDOM_SEED
         )
     else:

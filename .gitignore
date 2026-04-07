@@ -29,6 +29,7 @@ env/
 *.log
 *.tmp
 *.temp
+tmp*/
 *.bak
 *.swp
 *.swo

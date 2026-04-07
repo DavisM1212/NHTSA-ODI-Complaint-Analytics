@@ -47,11 +47,9 @@ from src.modeling.component_common import (
 )
 from src.modeling.component_multilabel import (
     CATBOOST_NAME,
+    build_metric_row as build_multilabel_metric_row,
     fit_catboost_holdout_with_fallback,
     fit_catboost_selection_with_fallback,
-)
-from src.modeling.component_multilabel import (
-    build_metric_row as build_multilabel_metric_row,
 )
 from src.modeling.tune_component_catboost import (
     evaluate_params_across_seeds,

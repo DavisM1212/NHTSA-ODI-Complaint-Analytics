@@ -99,6 +99,7 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |-- docs/
 |   |-- CMPL.txt
 |   |-- RCL.txt
+|   |-- figures/
 |   |-- screenshots/
 |   `-- ...
 |-- data/
@@ -275,7 +276,12 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
   - `component_official_benchmark_summary.csv`
   - `component_single_label_feature_importance.csv`
   - `component_multilabel_metrics.csv`
-- Ignored by Git
+- Mostly ignored by Git, except selected official summary artifacts such as the component benchmark summary files
+
+`docs/figures/component_models/`
+
+- Presentation-ready component-model figures generated from saved benchmark artifacts
+- Current generated figures include model lift, per-class F1, calibration, confusion, routing performance, and target-scope framing
 
 ### `scripts/` (quick setup commands)
 
@@ -398,6 +404,8 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `src/reporting/`
 
 - Reproducible tables/figures/report outputs for presentations and writeups
+- `update_component_readme.py`: refreshes the generated component benchmark block and official summary artifacts
+- `component_visuals.py`: generates presentation-ready figures for the locked component-model results
 
 ### Quick rule of thumb for beginners
 
@@ -719,7 +727,13 @@ The official single-label component result is the calibrated Wave 2b text + stru
 .\.venv\Scripts\python.exe -m src.reporting.update_component_readme
 ```
 
-These commands produce the benchmark tables, manifests, official summary artifacts, and generated README benchmark section.
+#### Generate component presentation figures
+
+```powershell
+.\.venv\Scripts\python.exe -m src.reporting.component_visuals
+```
+
+These commands produce the benchmark tables, manifests, official summary artifacts, generated README benchmark section, and presentation figures under `docs/figures/component_models/`.
 
 ## Git Basics Overview
 
