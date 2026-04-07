@@ -58,8 +58,9 @@ First built simple baselines on a time-aware split:
 We compared a naive baseline that just guessed the most frequent label, a logistic regression baseline, and then a structured CatBoost
 model. Logistic regression showed that the structured fields had real signal, but it was not strong enough to be the main benchmark.
 
-CatBoost was chosen because it handles mixed categorical and numeric data well, works with missing values, and does not require one-hot
-encoding. Local runs were slow to tune, so I moved the heavy CatBoost tuning work to Colab GPU and used Optuna for a focused search.
+CatBoost was chosen because it handles mixed category and numeric data well, works with missing values, and does not require creating many
+separate dummy columns for categories. Local runs were slow to tune, so I moved the heavy CatBoost tuning work to Colab GPU and used Optuna
+for a focused search.
 
 The evaluation metrics chosen were:
 - top-1 accuracy: proportion of instances where the model's number one most likely prediction matched the true label
@@ -211,14 +212,14 @@ Text overlap was checked so exact duplicated narratives would not silently drive
 
 The overlap was low enough to keep as a sensitivity diagnostic rather than exclude by default.
 
-Wave 2 used classical sparse text features:
+Wave 2 used simple text features:
 - word TF-IDF with 1-2 grams
 - character TF-IDF with 3-5 character word-boundary grams
 - no stemming
 - no lemmatization
 - no stop-word removal
 - linear SGD models for text (other models, such as LogReg, had unrealistic fit times)
-- late fusion between text probabilities and the structured CatBoost model
+- late fusion, meaning a blend of text-model scores and structured CatBoost scores
 
 We intentionally did not use transformers, embeddings, or CatBoost text features in this wave.
 
@@ -236,7 +237,7 @@ Single-label Wave 2 result:
 This was a major quality improvement, but it was initially not promoted because calibration worsened:
 - structured CatBoost holdout ECE: 0.0121
 - uncalibrated text fusion holdout ECE: about 0.1228
-- the model was mostly underconfident, not misranking badly
+- the model's confidence scores were mostly too low, but the ranking of likely labels was still strong
 
 Multi-label Wave 2 result:
 - best text family: `text_only_linear`
@@ -254,12 +255,12 @@ Because recall@3 and micro F1 declined, the multi-label text model was not promo
 
 9. Wave 2b Calibration And Final Component Benchmarks
 
-Wave 2b focused only on calibrating the single-label `text_structured_late_fusion` model. We used a ranking-preserving power calibration
-fit on `select_2025`, then evaluated once on `holdout_2026`.
+Wave 2b focused only on calibrating the single-label `text_structured_late_fusion` model. We used power calibration to adjust confidence
+scores without changing prediction order, fit it on `select_2025`, and then evaluated once on `holdout_2026`.
 
 Final promoted single-label component model:
 - model family: `text_structured_late_fusion`
-- text branch: SGD sparse text model
+- text branch: SGD text model
 - structured branch: CatBoost using `wave1_incident_cohort_history`
 - text weight: 0.75
 - structured selected iteration: 1280
@@ -336,39 +337,39 @@ Metrics used in the component-model work:
 - top-1 accuracy: the share of complaints where the model's highest-ranked component prediction is correct; useful for a single best
   component assignment
 - top-3 accuracy: the share of complaints where the true component appears in the model's three highest-ranked predictions; useful because
-  a short candidate list can still support triage and review
+  a short candidate list can still support review
 - precision: of the complaints predicted as a component, the share that truly belong to that component; useful for judging how noisy a
   component prediction is
 - recall: of the true complaints for a component, the share the model retrieves; useful for judging whether the model misses component
   patterns
-- F1: harmonic mean of precision and recall; useful because component classes are imbalanced and accuracy alone can hide bad tail behavior
-- macro F1: average F1 across component groups with each group weighted equally; used as the primary single-label metric because rare
-  component groups should not be hidden by the head classes
-- micro F1: global F1 across all multi-label decisions; used for multi-label routing because it reflects overall routing quality across
-  the whole label matrix
-- recall@3: in multi-label routing, the share of true labels recovered in the top three predicted labels; used because downstream review
-  can work from a short candidate list
-- precision@3: in multi-label routing, the share of the top three predicted labels that are true labels; used to penalize overly broad
-  routing lists
+- F1: one score that rewards both precision and recall; useful because component classes are imbalanced and accuracy alone can hide weak
+  rare-label behavior
+- macro F1: F1 calculated for each component and then averaged so each component counts equally; used because common labels should not hide
+  poor results on rare labels
+- micro F1: F1 calculated across all multi-label decisions at once; used because it shows overall multi-label quality across the whole
+  dataset
+- recall@3: in the multi-label task, the share of true labels recovered in the top three predicted labels; used because reviewers can work
+  from a short candidate list
+- precision@3: in the multi-label task, the share of the top three predicted labels that are true labels; used to show when the top-three
+  list contains too many wrong labels
 - label coverage: the share of component labels receiving at least one positive prediction; used to flag models that ignore rare labels
-- ECE: expected calibration error, or the weighted average gap between predicted confidence and observed accuracy across confidence bins;
-  used because probabilities may be shown as confidence scores
-- Brier score: mean squared error between predicted probabilities and the true class indicator; used as a full-probability calibration
-  check alongside ECE
+- ECE: expected calibration error, or how far predicted confidence is from actual accuracy; used because probabilities may be shown as
+  confidence scores
+- Brier score: a probability-error score where lower is better; used to check the whole probability output alongside ECE
 
 Models and methods used in the component-model work:
 - most frequent baseline: a naive model that predicts the most common component label or labels; used as the minimum bar for model value
-- logistic regression: a linear probability model; used as an interpretable baseline but not kept as the final model because CatBoost fit
-  structured data better and the large sparse text `saga` refit was too slow
-- SGD classifier: a linear model trained with stochastic gradient descent; used for sparse TF-IDF text because it scales to high-dimensional
-  text matrices and kept Wave 2b runtime bounded
-- TF-IDF: a sparse text representation that emphasizes distinctive words, phrases, and character patterns; used to convert complaint
+- logistic regression: a simple linear probability model; used as a baseline but not kept as the final model because CatBoost did better on
+  structured data and the large final text version ran too slowly
+- SGD classifier: a linear model trained in many small update steps; used for complaint text because it handles large text feature tables
+  quickly enough for repeatable runs
+- TF-IDF: a way to turn text into numbers by emphasizing distinctive words, phrases, and character patterns; used to convert complaint
   narratives into model-ready features without transformers or embeddings
-- CatBoost: gradient-boosted decision trees with strong categorical-feature handling; used for structured complaint fields such as make,
-  model, manufacturer, state, and complaint type
-- CatBoost MultiLabel: CatBoost configured for multi-label routing; kept as the official multi-label model because it preserved better
-  holdout micro F1 and recall@3 than the text multi-label model
-- late fusion: blending probabilities from separately trained text and structured models; used for the final single-label model so text
-  could dominate while structured vehicle/context signal still contributed
-- power calibration: raising probabilities to a selected alpha and renormalizing without changing prediction ranks; used to fix the
-  underconfident single-label text-fusion probabilities while preserving top-k behavior
+- CatBoost: a tree-based model that handles category-heavy data well; used for structured complaint fields such as make, model,
+  manufacturer, state, and complaint type
+- CatBoost MultiLabel: CatBoost adapted so one complaint can receive multiple component labels; kept as the official multi-label model
+  because it preserved better overall holdout performance than the text multi-label model
+- late fusion: combining scores from separately trained text and structured models; used for the final single-label model so text could
+  dominate while structured vehicle/context signal still contributed
+- power calibration: adjusting probabilities so confidence scores better match observed accuracy without changing prediction ranks; used
+  to fix the single-label text-fusion confidence scores while preserving top-k behavior

@@ -9,7 +9,7 @@ The component-model phase is locked with two official models:
 - Single-label component benchmark: calibrated Wave 2b `text_structured_late_fusion`
 - Multi-label routing benchmark: structured CatBoost MultiLabel on `core_structured`
 
-The models differ by task because the complaint narrative text produced a large and stable gain for the scoped single-label benchmark, while the text-based multi-label model traded too much micro F1 and recall@3 for tail-label macro F1. For the full multi-label routing problem, the structured CatBoost model remains the more useful official benchmark.
+The models differ by task because the complaint narrative text produced a large and stable gain for the scoped single-label benchmark. For the full multi-label component task, the text model improved rare labels but missed too much of the overall label set, so the structured CatBoost model remains the better official benchmark.
 
 ![Final Component Model Benchmarks](figures/component_models/component_official_benchmark_summary.png)
 
@@ -49,42 +49,42 @@ Metrics used in the component-model work:
 
 | Metric | What it means | Why it fits this project |
 | --- | --- | --- |
-| Top-1 accuracy | Share of complaints where the model's highest-ranked component prediction matches the target. | Easy to explain and useful when the model is forced to make one component assignment. |
-| Top-3 accuracy | Share of complaints where the true component appears anywhere in the model's top three predictions. | Better matches review and triage workflows where a short candidate list is still useful. |
-| Precision | Of the cases assigned to a component, the share that truly belong to that component. | Helps show whether a component prediction is noisy, especially for rare labels. |
-| Recall | Of the true cases for a component, the share the model successfully retrieves. | Important for not missing safety-related component patterns. |
-| F1 | Harmonic mean of precision and recall. | Balances false positives and false negatives better than accuracy alone. |
-| Macro F1 | Average F1 across component groups, giving each group equal weight. | Prevents large classes such as engine or electrical complaints from hiding poor rare-class behavior. |
-| Micro F1 | Global F1 computed across all label decisions. | Useful for multi-label routing because it reflects total routing quality across frequent and infrequent labels. |
-| Recall@3 | In multi-label routing, the share of true labels recovered inside the top three predicted labels. | Directly matches a triage workflow that can review a short list of candidate component groups. |
-| Precision@3 | In multi-label routing, the share of the top three predicted labels that are actually true labels. | Penalizes overbroad routing lists that contain too many irrelevant component groups. |
-| Label coverage | Share of component labels receiving at least one positive prediction. | Guards against models that look good by predicting only the head classes and ignoring the tail. |
-| ECE | Expected calibration error; the weighted average gap between predicted confidence and observed accuracy across confidence bins. | Needed because component probabilities may be presented as confidence scores, not just rankings. |
-| Multiclass Brier score | Mean squared error between predicted probabilities and the one-hot true label. | Complements ECE by measuring full-probability quality rather than only confidence-bin gaps. |
+| Top-1 accuracy | Share of complaints where the model's first-choice component is correct. | Easy to explain and useful when we want one component assignment. |
+| Top-3 accuracy | Share of complaints where the true component appears in the model's top three choices. | Useful because a short list of likely components can still support review. |
+| Precision | Of the complaints predicted as a component, the share that are actually that component. | Shows when a component prediction is noisy. |
+| Recall | Of the real complaints for a component, the share the model finds. | Shows when the model is missing component patterns. |
+| F1 | One score that rewards both precision and recall. | More useful than accuracy alone when classes are uneven. |
+| Macro F1 | F1 calculated for each component, then averaged so every component counts equally. | Keeps common labels from hiding poor results on rare labels. |
+| Micro F1 | F1 calculated across all multi-label decisions at once. | Shows overall multi-label quality across the full dataset. |
+| Recall@3 | In the multi-label task, the share of true labels found in the model's top three choices. | Shows whether the model puts the right labels near the top. |
+| Precision@3 | In the multi-label task, the share of the model's top three choices that are true labels. | Shows whether the top-three list contains too many wrong labels. |
+| Label coverage | Share of component labels that the model predicts at least once. | Helps catch models that ignore rare component groups. |
+| ECE | Expected calibration error; how far predicted confidence is from actual accuracy. | Needed when a probability may be read as a confidence score. |
+| Multiclass Brier score | A probability-error score; lower means the predicted probabilities fit the true labels better. | Checks the whole probability output, not just the winning label. |
 
 Models and modeling choices used in the component-model work:
 
 | Model or method | What it is | Why it was used |
 | --- | --- | --- |
 | Most frequent baseline | A naive model that always predicts the most common label or labels. | Establishes the minimum bar any useful component model must beat. |
-| Logistic regression | A linear classifier that learns class probabilities from weighted input features. | Used as an interpretable structured baseline; it was not the final single-label model because the structured signal was better captured by CatBoost and the large sparse final text refit was too slow with the `saga` solver. |
-| SGD classifier | A linear classifier trained with stochastic gradient descent. | Used for sparse TF-IDF text because it scales well to high-dimensional text matrices and gave bounded runtime where full logistic regression was impractical. |
-| TF-IDF | Text representation that weights terms by within-document frequency and downweights terms common across many complaints. | Converts narrative complaint text into model-ready sparse features while preserving domain phrases and character patterns. |
-| CatBoost | Gradient-boosted decision trees with strong categorical-feature support. | Used for structured complaint fields because the data contains many categorical fields such as make, model, manufacturer, state, and complaint type. |
-| CatBoost MultiLabel | CatBoost configured for multi-label component routing. | Used for the full kept-case routing benchmark because it preserved better holdout micro F1 and recall@3 than the text multi-label model. |
-| Late fusion | Combines probabilities from separate text and structured models after each model is trained. | Let the strong text model dominate single-label classification while still retaining structured vehicle/context signal. |
-| Power calibration | Raises predicted probabilities to a selected alpha and renormalizes them without changing the ranking. | Fixed the underconfident single-label text-fusion probabilities while preserving the model's excellent top-k ranking behavior. |
+| Logistic regression | A simple linear model that turns weighted inputs into class probabilities. | Used as a baseline; not final because CatBoost did better on structured fields and the large final text version ran too slowly. |
+| SGD classifier | A linear model trained in many small update steps. | Used for complaint text because it handles large text feature tables quickly enough for repeatable runs. |
+| TF-IDF | A way to turn text into numbers by emphasizing words or character patterns that are distinctive. | Converts complaint narratives into features while keeping useful phrases and wording patterns. |
+| CatBoost | A tree-based model that handles category-heavy data well. | Used for structured fields such as make, model, manufacturer, state, and complaint type. |
+| CatBoost MultiLabel | CatBoost adapted so one complaint can receive multiple component labels. | Used for the full kept-case multi-label benchmark because it kept better overall holdout performance than the text model. |
+| Late fusion | Combines scores from separate text and structured models after both models make predictions. | Let the single-label model rely heavily on narrative text while still using vehicle/context information. |
+| Power calibration | Adjusts probabilities to make confidence scores better match observed accuracy without changing prediction order. | Fixed confidence scores that were too low while preserving top-k behavior. |
 
 ## Problem Framing
 
-The component model estimates which vehicle component group is implicated in an ODI complaint. This is useful for summarizing defect patterns, supporting downstream severity or early-warning models, and reducing manual review burden. It should not be interpreted as proof of a confirmed defect.
+The component model estimates which vehicle component group is implicated in an ODI complaint. This is useful for summarizing defect patterns, supporting later severity or early-warning models, and reducing manual review burden. It should not be interpreted as proof of a confirmed defect.
 
 Two related but different modeling tasks are kept:
 
 - Single-label benchmark: scoped benchmark on complaints that collapse cleanly to one retained component group
-- Multi-label routing benchmark: full kept-case routing setup where a complaint can map to more than one component group
+- Multi-label benchmark: full kept-case setup where a complaint can map to more than one component group
 
-The single-label task is a cleaner classification benchmark. The multi-label task better reflects the real complaint-routing problem.
+The single-label task is a cleaner classification benchmark. The multi-label task better reflects the real complaint problem, where one complaint can mention more than one component.
 
 ![Component Target Scope](figures/component_models/component_target_scope.png)
 
@@ -101,7 +101,7 @@ Target scope:
 | Single-label benchmark cases | 251,667 | 72.61% | 8.68% |
 | Multi-label-only cases | 94,429 | 27.25% | 10.95% |
 
-This matters because the single-label benchmark is not the full routing problem. Multi-label-only complaints are systematically different and have a higher broad-severity rate, so they are preserved in the multi-label routing benchmark rather than discarded from the project.
+This matters because the single-label benchmark is not the full component problem. Multi-label-only complaints are systematically different and have a higher broad-severity rate, so they are preserved in the multi-label benchmark rather than discarded from the project.
 
 ## Split Strategy
 
@@ -149,13 +149,13 @@ The overlap was low and was monitored as a sensitivity diagnostic rather than us
 
 The final single-label component model is a calibrated late fusion of:
 
-- a sparse-text SGD model trained on complaint narrative text
+- an SGD text model trained on complaint narrative text
 - a structured CatBoost model using `wave1_incident_cohort_history`
 
 Final configuration:
 
 - family: `text_structured_late_fusion`
-- text branch: SGD sparse text model
+- text branch: SGD text model
 - structured branch: CatBoost
 - structured feature set: `wave1_incident_cohort_history`
 - text weight: 0.75
@@ -164,7 +164,7 @@ Final configuration:
 - calibration alpha: 1.5
 - calibration source: `select_2025`
 
-The text model uses classical sparse NLP features:
+The text model uses simple text features:
 
 - word TF-IDF with 1-2 grams
 - character word-boundary TF-IDF with 3-5 grams
@@ -194,13 +194,13 @@ Final configuration:
 - selected iteration: 1200
 - holdout split: `holdout_2026`
 
-The text-based multi-label model was evaluated but not promoted. It improved holdout macro F1 by predicting rare labels more aggressively, but it reduced micro F1, recall@3, and precision@3. Those tradeoffs are not acceptable for the routing use case, where preserving broad routing recall is more important than improving rare-label macro F1 alone.
+The text-based multi-label model was evaluated but not promoted. It improved holdout macro F1 by predicting rare labels more aggressively, but it reduced micro F1, recall@3, and precision@3. That tradeoff was not acceptable because the model missed too much of the overall label set.
 
 ![Multi-Label Class F1](figures/component_models/component_multilabel_class_f1.png)
 
 ## Calibration
 
-The uncalibrated single-label text fusion model was highly accurate but underconfident. Wave 2b applied ranking-preserving power calibration using `select_2025`.
+The uncalibrated single-label text fusion model was highly accurate, but its confidence scores were too low. Wave 2b applied power calibration using `select_2025`.
 
 Calibration result:
 
@@ -215,16 +215,16 @@ Calibration result:
 | ECE | 0.0243 |
 | Multiclass Brier score | 0.227377 |
 
-The final model is slightly overconfident overall, but the ECE remains inside the predefined promotion gate: baseline ECE 0.0121 plus allowed worsening 0.0200 gives a maximum acceptable ECE of 0.0321.
+The final model's confidence scores are now slightly high overall, but still within the allowed calibration limit. The maximum acceptable ECE was 0.0321, and the final ECE was 0.0243.
 
 ## Known Limitations
 
 - The single-label model applies to the scoped single-label benchmark subset, not to every kept component complaint.
-- The multi-label routing model is weaker on rare labels and should be used as a benchmark/routing aid rather than a high-confidence rare-label classifier.
+- The multi-label model is weaker on rare labels and should be used as a benchmark or review aid rather than a high-confidence rare-label classifier.
 - Complaints are consumer-reported signals and are not confirmed defects.
 - Component predictions should not be used as causal evidence about manufacturer responsibility, recall need, or defect existence.
 - Text features can learn domain language and complaint descriptions well, but they may also pick up reporting-style differences across time or source-era changes.
-- The final component models were tuned for component classification/routing, not severity ranking or early-warning detection.
+- The final component models were tuned for component prediction, not severity ranking or early-warning detection.
 
 ## Reproducibility Artifacts
 

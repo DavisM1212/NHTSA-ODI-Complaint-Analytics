@@ -40,7 +40,7 @@ The repo is now beyond the initial scaffold stage. Current completed work includ
 - `src/modeling/component_catboost.py`: final single-label benchmark with baselines and untouched 2026 holdout scoring
 - `src/modeling/component_multilabel.py`: multi-label routing benchmark on the full kept-case problem
 - `src/features/component_text_sidecar.py`: shared component narrative sidecar for leakage-aware text modeling
-- `src/modeling/component_text_wave2.py`: Wave 2 sparse-text experiment runner for component modeling
+- `src/modeling/component_text_wave2.py`: Wave 2 text-feature experiment runner for component modeling
 - `src/modeling/component_text_wave2b_calibration.py`: promoted calibrated single-label component benchmark
 
 <!-- COMPONENT_BENCHMARK_START -->
@@ -84,28 +84,28 @@ These definitions explain the metrics and models used in the component-model rep
 | Metric | Meaning | Why it matters here |
 | --- | --- | --- |
 | Top-1 accuracy | Share of complaints where the highest-ranked predicted component is correct. | Useful for a single best component assignment. |
-| Top-3 accuracy | Share of complaints where the true component appears in the three highest-ranked predictions. | Matches a triage/review workflow where a short candidate list is still useful. |
+| Top-3 accuracy | Share of complaints where the true component appears in the three highest-ranked predictions. | Useful because a short list of likely components can still support review. |
 | Precision | Share of predictions for a component that are correct. | Shows whether a component prediction is noisy. |
 | Recall | Share of true cases for a component that the model retrieves. | Shows whether the model misses component patterns. |
-| F1 | Harmonic mean of precision and recall. | Balances false positives and false negatives. |
-| Macro F1 | Average F1 across component groups with each group weighted equally. | Keeps rare component groups visible despite heavy class imbalance. |
-| Micro F1 | Global F1 across all label decisions. | Useful for the multi-label model because it reflects overall routing quality. |
-| Recall@3 | Share of true multi-label component groups recovered in the top three predictions. | Directly measures whether the routing model surfaces the right candidates for review. |
-| Precision@3 | Share of the top three predicted component groups that are true labels. | Penalizes overly broad top-three lists. |
+| F1 | One score that rewards both precision and recall. | More useful than accuracy alone when classes are uneven. |
+| Macro F1 | F1 calculated for each component, then averaged so every component counts equally. | Keeps common labels from hiding poor results on rare labels. |
+| Micro F1 | F1 calculated across all multi-label decisions at once. | Shows overall multi-label quality across the full dataset. |
+| Recall@3 | Share of true multi-label component groups recovered in the top three predictions. | Shows whether the model puts the right labels near the top. |
+| Precision@3 | Share of the top three predicted component groups that are true labels. | Shows whether the top-three list contains too many wrong labels. |
 | Label coverage | Share of labels receiving at least one positive prediction. | Guards against models that ignore rare component groups. |
-| ECE | Expected calibration error; confidence-vs-accuracy gap across probability bins. | Needed when probabilities may be interpreted as confidence scores. |
-| Brier score | Mean squared error of predicted probabilities against the true class indicator. | Provides a full-probability calibration/error check alongside ECE. |
+| ECE | Expected calibration error; how far predicted confidence is from actual accuracy. | Needed when a probability may be read as a confidence score. |
+| Brier score | Probability-error score; lower means the predicted probabilities fit the true labels better. | Checks the whole probability output, not just the winning label. |
 
 | Model or method | Meaning | Why it was used here |
 | --- | --- | --- |
 | Most frequent baseline | Naive model that predicts the most common component label or labels. | Establishes the minimum model quality bar. |
-| Logistic regression | Linear classifier that learns class probabilities from weighted input features. | Used as an interpretable baseline; not final because CatBoost fit structured data better and large sparse final text refits were too slow with `saga`. |
-| SGD classifier | Linear classifier optimized with stochastic gradient descent. | Used for sparse TF-IDF text because it scales well and kept Wave 2b runtime bounded. |
-| TF-IDF | Sparse text representation that emphasizes distinctive terms and phrases. | Turns complaint narratives into model-ready features without using transformers or embeddings. |
-| CatBoost | Gradient-boosted tree model with strong categorical-feature handling. | Used for mixed structured complaint fields such as make, model, manufacturer, state, and complaint type. |
-| CatBoost MultiLabel | CatBoost multi-label classifier for assigning multiple possible component groups. | Kept as the official routing model because it preserved better holdout micro F1 and recall@3 than the text multi-label model. |
-| Late fusion | Probability blending from separately trained text and structured models. | Let the single-label model use narrative text while retaining structured vehicle/context signal. |
-| Power calibration | Ranking-preserving probability sharpening/softening selected on `select_2025`. | Corrected the underconfident single-label text-fusion probabilities while preserving top-k accuracy. |
+| Logistic regression | Simple linear model that turns weighted inputs into class probabilities. | Used as a baseline; not final because CatBoost did better on structured fields and the large final text version ran too slowly. |
+| SGD classifier | Linear model trained in many small update steps. | Used for complaint text because it handles large text feature tables quickly enough for repeatable runs. |
+| TF-IDF | Way to turn text into numbers by emphasizing distinctive words or character patterns. | Turns complaint narratives into model-ready features without using transformers or embeddings. |
+| CatBoost | Tree-based model that handles category-heavy data well. | Used for mixed structured complaint fields such as make, model, manufacturer, state, and complaint type. |
+| CatBoost MultiLabel | CatBoost adapted so one complaint can receive multiple component labels. | Kept as the official multi-label model because it preserved better overall holdout performance than the text multi-label model. |
+| Late fusion | Combines scores from separately trained text and structured models. | Let the single-label model use narrative text while retaining structured vehicle/context signal. |
+| Power calibration | Adjusts probabilities to make confidence scores better match observed accuracy without changing prediction order. | Corrected the single-label text-fusion confidence scores while preserving top-k accuracy. |
 
 ## Repository Structure
 
@@ -130,7 +130,6 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- CMPL.txt
 |   |-- RCL.txt
 |   |-- figures/
-|   |-- screenshots/
 |   `-- ...
 |-- data/
 |   |-- raw/         # committed source zips + checksum manifest
@@ -412,7 +411,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - `component_catboost.py`: structured single-label benchmark with baselines, holdout scoring, calibration, and manifests
 - `tune_component_catboost.py`: single-label feature-set selection plus focused CatBoost tuning
 - `component_multilabel.py`: multi-label routing benchmark for the full kept-case target
-- `component_text_wave2.py`: Wave 2 sparse-text component modeling experiment path
+- `component_text_wave2.py`: Wave 2 text-feature component modeling experiment path
 - `component_text_wave2b_calibration.py`: calibrated single-label component model promoted as the official single-label benchmark
 
 `src/evaluation/`
@@ -526,8 +525,8 @@ If that fails, install Python manually:
 
 Manual install sources:
 
-- Windows: https://www.python.org/ftp/python/3.13.12/python-3.13.12-amd64.exe
-- macOS: https://www.python.org/ftp/python/3.13.12/python-3.13.12-macos11.pkg
+- Windows: <https://www.python.org/ftp/python/3.13.12/python-3.13.12-amd64.exe>
+- macOS: <https://www.python.org/ftp/python/3.13.12/python-3.13.12-macos11.pkg>
 
 ### 5) Run setup verification explicitly (optional)
 
@@ -537,6 +536,12 @@ The setup scripts already run verification, but you can rerun it manually anytim
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\verify_install.py
+```
+
+If you skipped the setup script and created the environment manually, run this once to enable automatic output clearing for exploration notebooks:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\install_git_filters.py
 ```
 
 #### macOS / Linux
@@ -554,14 +559,6 @@ What `scripts/verify_install.py` checks:
 - write access to `data/outputs/`
 
 If you skipped the setup script and created the environment manually, run this once to enable automatic output clearing for exploration notebooks:
-
-#### Windows
-
-```powershell
-.\.venv\Scripts\python.exe scripts\install_git_filters.py
-```
-
-#### macOS / Linux
 
 ```bash
 .venv/bin/python scripts/install_git_filters.py
