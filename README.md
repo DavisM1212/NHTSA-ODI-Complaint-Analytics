@@ -42,6 +42,8 @@ The repo is now beyond the initial scaffold stage. Current completed work includ
 - `src/features/component_text_sidecar.py`: shared component narrative sidecar for leakage-aware text modeling
 - `src/modeling/component_text_wave2.py`: Wave 2 text-feature experiment runner for component modeling
 - `src/modeling/component_text_wave2b_calibration.py`: promoted calibrated single-label component benchmark
+- `notebooks/Severity_Ranking_Framework.ipynb`: scaffold for severity ranking
+- `notebooks/NLP_Early_Warning_Framework.ipynb`: scaffold for monthly early-warning watchlists
 
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
@@ -107,6 +109,29 @@ These definitions explain the metrics and models used in the component-model rep
 | Late fusion | Combines scores from separately trained text and structured models. | Let the single-label model use narrative text while retaining structured vehicle/context signal. |
 | Power calibration | Adjusts probabilities to make confidence scores better match observed accuracy without changing prediction order. | Corrected the single-label text-fusion confidence scores while preserving top-k accuracy. |
 
+## Modeling Framework Notebooks
+
+The next project sections are set up as runnable scaffold notebooks so others can contribute without needing to understand the full `src/` pipeline first.
+
+Run the normal README setup and pipeline first, then open:
+
+- `notebooks/Severity_Ranking_Framework.ipynb`
+- `notebooks/NLP_Early_Warning_Framework.ipynb`
+
+Each notebook includes setup cells, data loading, short plain-English explanations, starter baselines, result-saving cells, and reflection prompts. The severity notebook uses the prepared severity case table and focuses on ranking uncommon high-risk complaints. The early-warning notebook builds a rule-based monthly watchlist from component cohorts, complaint growth, broad-severity rate, and narrative text clues.
+
+Expected inputs:
+
+- `data/processed/odi_severity_cases.parquet`
+- `data/processed/odi_component_multilabel_cases.parquet`
+- `data/processed/odi_component_text_sidecar.parquet`
+
+Expected outputs:
+
+- `data/outputs/severity_partner_results.csv`
+- `data/outputs/nlp_early_warning_watchlist.csv`
+- `data/outputs/nlp_early_warning_terms.csv`
+
 ## Repository Structure
 
 High-level layout:
@@ -147,7 +172,9 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |-- notebooks/
 |   |-- EDA.ipynb
 |   |-- Cleaning.ipynb
-|   `-- Component_Modeling.ipynb
+|   |-- Component_Modeling.ipynb
+|   |-- Severity_Ranking_Framework.ipynb
+|   `-- NLP_Early_Warning_Framework.ipynb
 `-- src/
     |-- __init__.py
     |-- config/
@@ -369,6 +396,20 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Exploratory notebook for the original single-label structured benchmark
 - Useful for diagnosis and ideas, but not the source of truth for published benchmark numbers
+
+`notebooks/Severity_Ranking_Framework.ipynb`
+
+- Starting notebook for the severity-ranking section
+- Loads `data/processed/odi_severity_cases.parquet`
+- Shows time-aware train/validation/holdout splits, a naive baseline, a structured baseline, a text baseline, and ranking metrics such as PR-AUC and recall in the top highest-risk rows
+- Writes `data/outputs/severity_partner_results.csv`
+
+`notebooks/NLP_Early_Warning_Framework.ipynb`
+
+- Starting notebook for the NLP early-warning section
+- Loads `data/processed/odi_component_multilabel_cases.parquet` and `data/processed/odi_component_text_sidecar.parquet`
+- Builds a monthly make/model/model-year/component watchlist from complaint volume, growth, broad-severity rate, and simple text clues
+- Writes `data/outputs/nlp_early_warning_watchlist.csv` and `data/outputs/nlp_early_warning_terms.csv`
 
 ### `src/` ("source" folder, contains main Python files grouped by objective)
 

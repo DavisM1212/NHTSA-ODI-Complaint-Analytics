@@ -9,6 +9,7 @@
         "source.fixAll.ruff": "explicit",
         "source.organizeImports.ruff": "explicit"
     },
+    "notebook.defaultFormatter": "charliermarsh.ruff",
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": false,
     "files.exclude": {
