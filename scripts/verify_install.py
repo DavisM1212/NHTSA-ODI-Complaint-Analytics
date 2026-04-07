@@ -10,7 +10,6 @@ TARGET_PYTHON_VERSION = "3.13.12"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_DIRS = [
     "docs",
-    "docs/screenshots",
     "data",
     "data/raw",
     "data/extracted",
