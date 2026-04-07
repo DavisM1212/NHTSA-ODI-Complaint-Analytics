@@ -328,3 +328,47 @@ The generated figure set covers:
 The figures can be regenerated with:
 
 `.\.venv\Scripts\python.exe -m src.reporting.component_visuals`
+
+
+11. Metric And Model Glossary
+
+Metrics used in the component-model work:
+- top-1 accuracy: the share of complaints where the model's highest-ranked component prediction is correct; useful for a single best
+  component assignment
+- top-3 accuracy: the share of complaints where the true component appears in the model's three highest-ranked predictions; useful because
+  a short candidate list can still support triage and review
+- precision: of the complaints predicted as a component, the share that truly belong to that component; useful for judging how noisy a
+  component prediction is
+- recall: of the true complaints for a component, the share the model retrieves; useful for judging whether the model misses component
+  patterns
+- F1: harmonic mean of precision and recall; useful because component classes are imbalanced and accuracy alone can hide bad tail behavior
+- macro F1: average F1 across component groups with each group weighted equally; used as the primary single-label metric because rare
+  component groups should not be hidden by the head classes
+- micro F1: global F1 across all multi-label decisions; used for multi-label routing because it reflects overall routing quality across
+  the whole label matrix
+- recall@3: in multi-label routing, the share of true labels recovered in the top three predicted labels; used because downstream review
+  can work from a short candidate list
+- precision@3: in multi-label routing, the share of the top three predicted labels that are true labels; used to penalize overly broad
+  routing lists
+- label coverage: the share of component labels receiving at least one positive prediction; used to flag models that ignore rare labels
+- ECE: expected calibration error, or the weighted average gap between predicted confidence and observed accuracy across confidence bins;
+  used because probabilities may be shown as confidence scores
+- Brier score: mean squared error between predicted probabilities and the true class indicator; used as a full-probability calibration
+  check alongside ECE
+
+Models and methods used in the component-model work:
+- most frequent baseline: a naive model that predicts the most common component label or labels; used as the minimum bar for model value
+- logistic regression: a linear probability model; used as an interpretable baseline but not kept as the final model because CatBoost fit
+  structured data better and the large sparse text `saga` refit was too slow
+- SGD classifier: a linear model trained with stochastic gradient descent; used for sparse TF-IDF text because it scales to high-dimensional
+  text matrices and kept Wave 2b runtime bounded
+- TF-IDF: a sparse text representation that emphasizes distinctive words, phrases, and character patterns; used to convert complaint
+  narratives into model-ready features without transformers or embeddings
+- CatBoost: gradient-boosted decision trees with strong categorical-feature handling; used for structured complaint fields such as make,
+  model, manufacturer, state, and complaint type
+- CatBoost MultiLabel: CatBoost configured for multi-label routing; kept as the official multi-label model because it preserved better
+  holdout micro F1 and recall@3 than the text multi-label model
+- late fusion: blending probabilities from separately trained text and structured models; used for the final single-label model so text
+  could dominate while structured vehicle/context signal still contributed
+- power calibration: raising probabilities to a selected alpha and renormalizing without changing prediction ranks; used to fix the
+  underconfident single-label text-fusion probabilities while preserving top-k behavior

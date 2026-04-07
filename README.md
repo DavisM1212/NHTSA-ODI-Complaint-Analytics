@@ -77,6 +77,36 @@ The official published component-model scores come from the untouched `2026` hol
 
 <!-- COMPONENT_BENCHMARK_END -->
 
+## Component Metric And Model Glossary
+
+These definitions explain the metrics and models used in the component-model reporting.
+
+| Metric | Meaning | Why it matters here |
+| --- | --- | --- |
+| Top-1 accuracy | Share of complaints where the highest-ranked predicted component is correct. | Useful for a single best component assignment. |
+| Top-3 accuracy | Share of complaints where the true component appears in the three highest-ranked predictions. | Matches a triage/review workflow where a short candidate list is still useful. |
+| Precision | Share of predictions for a component that are correct. | Shows whether a component prediction is noisy. |
+| Recall | Share of true cases for a component that the model retrieves. | Shows whether the model misses component patterns. |
+| F1 | Harmonic mean of precision and recall. | Balances false positives and false negatives. |
+| Macro F1 | Average F1 across component groups with each group weighted equally. | Keeps rare component groups visible despite heavy class imbalance. |
+| Micro F1 | Global F1 across all label decisions. | Useful for the multi-label model because it reflects overall routing quality. |
+| Recall@3 | Share of true multi-label component groups recovered in the top three predictions. | Directly measures whether the routing model surfaces the right candidates for review. |
+| Precision@3 | Share of the top three predicted component groups that are true labels. | Penalizes overly broad top-three lists. |
+| Label coverage | Share of labels receiving at least one positive prediction. | Guards against models that ignore rare component groups. |
+| ECE | Expected calibration error; confidence-vs-accuracy gap across probability bins. | Needed when probabilities may be interpreted as confidence scores. |
+| Brier score | Mean squared error of predicted probabilities against the true class indicator. | Provides a full-probability calibration/error check alongside ECE. |
+
+| Model or method | Meaning | Why it was used here |
+| --- | --- | --- |
+| Most frequent baseline | Naive model that predicts the most common component label or labels. | Establishes the minimum model quality bar. |
+| Logistic regression | Linear classifier that learns class probabilities from weighted input features. | Used as an interpretable baseline; not final because CatBoost fit structured data better and large sparse final text refits were too slow with `saga`. |
+| SGD classifier | Linear classifier optimized with stochastic gradient descent. | Used for sparse TF-IDF text because it scales well and kept Wave 2b runtime bounded. |
+| TF-IDF | Sparse text representation that emphasizes distinctive terms and phrases. | Turns complaint narratives into model-ready features without using transformers or embeddings. |
+| CatBoost | Gradient-boosted tree model with strong categorical-feature handling. | Used for mixed structured complaint fields such as make, model, manufacturer, state, and complaint type. |
+| CatBoost MultiLabel | CatBoost multi-label classifier for assigning multiple possible component groups. | Kept as the official routing model because it preserved better holdout micro F1 and recall@3 than the text multi-label model. |
+| Late fusion | Probability blending from separately trained text and structured models. | Let the single-label model use narrative text while retaining structured vehicle/context signal. |
+| Power calibration | Ranking-preserving probability sharpening/softening selected on `select_2025`. | Corrected the underconfident single-label text-fusion probabilities while preserving top-k accuracy. |
+
 ## Repository Structure
 
 High-level layout:
