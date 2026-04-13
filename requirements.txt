@@ -46,7 +46,7 @@ pandas==3.0.1
 pandera==0.29.0
 parso==0.8.6
 patsy==1.0.2
-pillow==12.1.1
+pillow==12.2.0
 platformdirs==4.9.2
 pluggy==1.6.0
 preshed==3.0.12
