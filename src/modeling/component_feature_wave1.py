@@ -12,6 +12,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
+from src.data.io_utils import json_ready, load_frame, write_json
 from src.modeling.component_common import (
     DEFAULT_SELECTION_SEEDS,
     FEATURE_WAVE1_SPLIT_MODE,
@@ -28,33 +29,31 @@ from src.modeling.component_common import (
     build_multiclass_metric_row,
     compose_feature_manifest,
     fit_catboost_with_external_selection,
-    get_git_dirty_flag,
-    get_git_head,
     get_split_policy,
-    json_ready,
-    load_frame,
     parse_pipe_labels,
     prep_catboost_frames,
     prep_multi_label_cases,
     prep_single_label_cases,
-    runtime_manifest,
     score_multiclass_from_proba,
-    sha256_path,
     split_multi_label_cases_by_mode,
     split_single_label_cases_by_mode,
     subset_case_frame,
-    write_json,
 )
-from src.modeling.component_multilabel import (
+from src.modeling.component_multilabel_shared import (
     CATBOOST_NAME,
-    build_metric_row as build_multilabel_metric_row,
     fit_catboost_holdout_with_fallback,
     fit_catboost_selection_with_fallback,
 )
-from src.modeling.tune_component_catboost import (
+from src.modeling.component_multilabel_shared import (
+    build_metric_row as build_multilabel_metric_row,
+)
+from src.modeling.component_tuning_shared import (
     evaluate_params_across_seeds,
     summarize_seed_metrics,
 )
+
+# Workflow owner for Wave 1 structured feature-family comparisons
+# Uses locked single-label and multi-label baselines, then writes its own screen/select/holdout artifacts
 
 # -----------------------------------------------------------------------------
 # Output names
@@ -169,7 +168,6 @@ def feature_row_base(task_name, feature_info, input_path, split_mode, hyperparam
         'removed_cols': compact_list(feature_info.get('removed_cols', [])),
         'split_mode': split_mode,
         'input_path': str(input_path),
-        'input_sha256': sha256_path(input_path),
         'hyperparam_policy': hyperparam_policy
     }
 
@@ -1080,11 +1078,6 @@ def main():
         'artifact_role': FEATUREWAVE_TASK,
         'feature_wave': 1,
         'split_mode': FEATURE_WAVE1_SPLIT_MODE,
-        'runtime': runtime_manifest(),
-        'code_version': {
-            'git_head': get_git_head(),
-            'git_dirty': get_git_dirty_flag()
-        },
         'feature_families': json_ready(
             {
                 name: {

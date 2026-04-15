@@ -6,12 +6,11 @@ import pandas as pd
 
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
-from src.data.io_utils import write_dataframe
+from src.data.io_utils import load_frame, write_dataframe
 from src.modeling.component_common import (
     FEATURE_WAVE1_SPLIT_MODE,
     MULTI_INPUT_STEM,
     get_split_policy,
-    load_frame,
 )
 
 # -----------------------------------------------------------------------------

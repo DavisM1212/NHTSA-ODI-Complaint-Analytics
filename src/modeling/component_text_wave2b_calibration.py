@@ -9,6 +9,7 @@ from sklearn.metrics import log_loss
 
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
+from src.data.io_utils import load_frame, write_json
 from src.features.component_text_sidecar import SIDECAR_STEM
 from src.modeling.component_common import (
     FEATURE_WAVE1_SPLIT_MODE,
@@ -18,16 +19,11 @@ from src.modeling.component_common import (
     build_multiclass_class_df,
     build_multiclass_confusion_df,
     feature_manifest,
-    get_git_dirty_flag,
-    get_git_head,
-    load_frame,
     prep_single_label_cases,
-    runtime_manifest,
     score_multiclass_from_proba,
     split_single_label_cases_by_mode,
-    write_json,
 )
-from src.modeling.component_text_wave2 import (
+from src.modeling.component_text_shared import (
     FINAL_LINEAR_MODEL_CHOICES,
     FINAL_LINEAR_MODEL_DEFAULT,
     LATE_FUSION_FAMILY,
@@ -49,6 +45,9 @@ from src.modeling.component_text_wave2 import (
     merge_text_sidecar,
     read_locked_single_ece,
 )
+
+# Workflow owner for post-Wave 2 single-label calibration
+# Runs after component_text_wave2.py and writes the calibrated holdout artifacts
 
 WAVE2_MANIFEST = OUTPUTS_DIR / 'component_textwave2_manifest.json'
 GLOBAL_MANIFEST_NAME = 'component_textwave2b_calibration_manifest.json'
@@ -485,11 +484,6 @@ def main():
         'input_path': str(input_path),
         'text_sidecar_path': str(text_sidecar_path),
         'runtime_seconds': round(perf_counter() - start_total, 2),
-        'runtime': runtime_manifest(),
-        'code_version': {
-            'git_head': get_git_head(),
-            'git_dirty': get_git_dirty_flag(),
-        },
         'wave2_manifest': str(WAVE2_MANIFEST),
         'wave2_manifest_selected_family': wave2_manifest.get('tasks', {}).get('single_label', {}).get('selected_family'),
         'artifacts': {

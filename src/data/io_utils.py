@@ -1,11 +1,14 @@
+import json
 import re
 import shutil
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from src.config.constants import DATE_COLUMN_HINTS, MODEL_YEAR_COLUMN_CANDIDATES
+from src.config.paths import PROCESSED_DATA_DIR
 
 
 # -----------------------------------------------------------------------------
@@ -61,6 +64,24 @@ def safe_extract_zip(zip_path, target_dir, overwrite=False):
             extracted_paths.append(destination)
 
     return sorted(set(extracted_paths))
+
+
+def _resolve_input_path(input_stem, input_path=None):
+    if input_path is not None:
+        path = Path(input_path)
+        if not path.exists():
+            raise FileNotFoundError(f'Input file not found: {path}')
+        return path
+
+    parquet_path = PROCESSED_DATA_DIR / f'{input_stem}.parquet'
+    if parquet_path.exists():
+        return parquet_path
+
+    csv_path = PROCESSED_DATA_DIR / f'{input_stem}.csv'
+    if csv_path.exists():
+        return csv_path
+
+    raise FileNotFoundError(f'No processed file found for {input_stem}')
 
 
 # -----------------------------------------------------------------------------
@@ -125,6 +146,13 @@ def read_tabular_file(file_path, header="infer", column_names=None):
     raise RuntimeError(f"Unable to read {file_path} as a tabular file") from last_error
 
 
+def load_frame(input_stem, input_path=None):
+    path = _resolve_input_path(input_stem, input_path=input_path)
+    if path.suffix.lower() == '.parquet':
+        return pd.read_parquet(path), path
+    return pd.read_csv(path, dtype=str, low_memory=False), path
+
+
 def minor_preprocess_complaints(df):
     working_df = df.copy()
 
@@ -168,3 +196,34 @@ def write_dataframe(df, output_stem, prefer_parquet=True):
     output_path = output_stem.with_suffix(".csv")
     df.to_csv(output_path, index=False)
     return output_path
+
+
+def json_ready(value):
+    if isinstance(value, dict):
+        return {key: json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_ready(item) for item in value]
+    if isinstance(value, tuple):
+        return [json_ready(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, pd.Timedelta):
+        return str(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if pd.isna(value):
+        return None
+    return value
+
+
+def write_json(payload, output_path):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open('w', encoding='utf-8') as handle:
+        json.dump(json_ready(payload), handle, indent=2)

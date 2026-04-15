@@ -5,6 +5,7 @@ import optuna
 import pandas as pd
 
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
+from src.data.io_utils import json_ready, load_frame, write_json
 from src.modeling.component_common import (
     BENCHMARK_FEATURE_SET_NAMES,
     DEFAULT_SELECTION_SEEDS,
@@ -13,17 +14,16 @@ from src.modeling.component_common import (
     TRAIN_END,
     VALID_END,
     feature_manifest,
-    fit_catboost_with_external_selection,
-    get_git_dirty_flag,
-    get_git_head,
-    json_ready,
-    load_frame,
     prep_single_label_cases,
-    runtime_manifest,
-    sha256_path,
     split_single_label_cases,
-    write_json,
 )
+from src.modeling.component_tuning_shared import (
+    evaluate_params_across_seeds,
+    summarize_seed_metrics,
+)
+
+# Workflow owner for locked single-label CatBoost tuning
+# Produces the selection manifest used by component_catboost.py
 
 # -----------------------------------------------------------------------------
 # Output names
@@ -176,58 +176,6 @@ def suggest_params(trial):
         'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 4.0, 12.0),
         'random_strength': trial.suggest_float('random_strength', 0.05, 0.6, log=True),
         'subsample': trial.suggest_float('subsample', 0.60, 0.75)
-    }
-
-
-def evaluate_params_across_seeds(train_df, valid_df, feature_info, params, task_type, devices, seed_list, verbose, selection_eval_period=1, progress_label=None):
-    run_rows = []
-    total_seeds = len(seed_list)
-    for seed_idx, seed in enumerate(seed_list, start=1):
-        result = fit_catboost_with_external_selection(
-            train_df,
-            valid_df,
-            feature_info,
-            params,
-            task_type=task_type,
-            devices=devices,
-            random_seed=seed,
-            verbose=verbose,
-            selection_eval_period=selection_eval_period,
-            include_train_outputs=False,
-            include_valid_outputs=False
-        )
-        row = {
-            'seed': seed,
-            'fit_seconds': result['fit_seconds'],
-            'selected_iteration': result['selected_iteration'],
-            'top_1_accuracy': result['valid_metrics']['top_1_accuracy'],
-            'macro_f1': result['valid_metrics']['macro_f1'],
-            'top_3_accuracy': result['valid_metrics']['top_3_accuracy']
-        }
-        run_rows.append(row)
-
-        if progress_label:
-            log_line(
-                f'[{progress_label}] seed {seed_idx}/{total_seeds} ({seed}) '
-                f'fit={row["fit_seconds"]:.2f}s iter={row["selected_iteration"]} '
-                f'macro_f1={row["macro_f1"]:.4f} top1={row["top_1_accuracy"]:.4f} '
-                f'top3={row["top_3_accuracy"]:.4f}'
-            )
-    return pd.DataFrame(run_rows)
-
-
-def summarize_seed_metrics(run_df):
-    return {
-        'fit_seconds_mean': round(float(run_df['fit_seconds'].mean()), 2),
-        'fit_seconds_std': round(float(run_df['fit_seconds'].std(ddof=0)), 2),
-        'selected_iteration_mean': round(float(run_df['selected_iteration'].mean()), 2),
-        'selected_iteration_median': int(run_df['selected_iteration'].median()),
-        'top_1_accuracy_mean': round(float(run_df['top_1_accuracy'].mean()), 4),
-        'top_1_accuracy_std': round(float(run_df['top_1_accuracy'].std(ddof=0)), 4),
-        'macro_f1_mean': round(float(run_df['macro_f1'].mean()), 4),
-        'macro_f1_std': round(float(run_df['macro_f1'].std(ddof=0)), 4),
-        'top_3_accuracy_mean': round(float(run_df['top_3_accuracy'].mean()), 4),
-        'top_3_accuracy_std': round(float(run_df['top_3_accuracy'].std(ddof=0)), 4)
     }
 
 
@@ -590,12 +538,6 @@ def main():
         'target_scope': 'single_label_benchmark',
         'input_stem': SINGLE_INPUT_STEM,
         'input_path': str(input_path),
-        'input_sha256': sha256_path(input_path),
-        'code_version': {
-            'git_head': get_git_head(),
-            'git_dirty': get_git_dirty_flag()
-        },
-        'runtime': runtime_manifest(),
         'split_policy': {
             'train_end': str(TRAIN_END.date()),
             'valid_end': str(VALID_END.date()),

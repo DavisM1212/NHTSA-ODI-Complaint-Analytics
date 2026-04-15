@@ -18,7 +18,7 @@ from threadpoolctl import threadpool_limits
 
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
-from src.data.io_utils import write_dataframe
+from src.data.io_utils import load_frame, write_dataframe, write_json
 from src.modeling.component_common import (
     DATE_COL,
     FEATURE_SET_DEFS,
@@ -34,18 +34,14 @@ from src.modeling.component_common import (
     build_multiclass_confusion_df,
     build_multiclass_metric_row,
     feature_manifest,
-    get_git_dirty_flag,
-    get_git_head,
-    json_ready,
-    load_frame,
     prep_catboost_frames,
     prep_single_label_cases,
-    runtime_manifest,
     score_multiclass_from_proba,
-    sha256_path,
     split_single_label_cases,
-    write_json,
 )
+
+# Workflow owner for locked single-label benchmarks
+# Runs after tune_component_catboost.py and writes the baseline artifacts used downstream
 
 # -----------------------------------------------------------------------------
 # Output names
@@ -609,9 +605,7 @@ def main():
         'target_scope': 'single_label_benchmark',
         'input_stem': SINGLE_INPUT_STEM,
         'input_path': str(input_path),
-        'input_sha256': sha256_path(input_path),
         'selection_manifest_path': str(selection_manifest_path),
-        'selection_manifest_sha256': sha256_path(selection_manifest_path),
         'selected_feature_set': feature_info['feature_set_name'],
         'feature_manifest': feature_info,
         'best_params': best_params,
@@ -619,11 +613,6 @@ def main():
         'official_metric': 'macro_f1 on holdout_2026',
         'official_holdout_metrics': holdout_metric_row.to_dict(),
         'candidate_models': ['Most Frequent Label', 'Logistic Regression', 'HistGradientBoosting', 'CatBoost'],
-        'runtime': runtime_manifest(),
-        'code_version': {
-            'git_head': get_git_head(),
-            'git_dirty': get_git_dirty_flag()
-        },
         'split_policy': {
             'train_end': str(TRAIN_END.date()),
             'valid_end': str(VALID_END.date()),

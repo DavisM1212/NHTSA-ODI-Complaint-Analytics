@@ -1,9 +1,3 @@
-import hashlib
-import json
-import platform
-import subprocess
-import sys
-from pathlib import Path
 from time import perf_counter
 
 import numpy as np
@@ -17,7 +11,6 @@ from sklearn.metrics import (
 )
 
 from src.config import settings
-from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, PROJECT_ROOT
 
 # -----------------------------------------------------------------------------
 # Core dataset and split definitions
@@ -271,120 +264,6 @@ SPLIT_POLICIES = {
         'holdout_policy': '2026 holdout untouched during feature-family screening and promotion'
     }
 }
-
-
-# -----------------------------------------------------------------------------
-# Shared file helpers
-# -----------------------------------------------------------------------------
-def resolve_input_path(input_stem, input_path=None):
-    if input_path is not None:
-        path = Path(input_path)
-        if not path.exists():
-            raise FileNotFoundError(f'Input file not found: {path}')
-        return path
-
-    parquet_path = PROCESSED_DATA_DIR / f'{input_stem}.parquet'
-    if parquet_path.exists():
-        return parquet_path
-
-    csv_path = PROCESSED_DATA_DIR / f'{input_stem}.csv'
-    if csv_path.exists():
-        return csv_path
-
-    raise FileNotFoundError(f'No processed file found for {input_stem}')
-
-
-def load_frame(input_stem, input_path=None):
-    path = resolve_input_path(input_stem, input_path=input_path)
-    if path.suffix.lower() == '.parquet':
-        return pd.read_parquet(path), path
-    return pd.read_csv(path, dtype=str, low_memory=False), path
-
-
-def sha256_path(path):
-    digest = hashlib.sha256()
-    with Path(path).open('rb') as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def get_git_head():
-    try:
-        result = subprocess.run(
-            ['git', 'rev-parse', 'HEAD'],
-            cwd=PROJECT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        return result.stdout.strip()
-    except Exception:
-        return None
-
-
-def get_git_dirty_flag():
-    try:
-        result = subprocess.run(
-            ['git', 'status', '--porcelain'],
-            cwd=PROJECT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        return bool(result.stdout.strip())
-    except Exception:
-        return None
-
-
-def runtime_manifest():
-    versions = {}
-    for package_name in ['numpy', 'pandas', 'sklearn', 'catboost', 'optuna']:
-        try:
-            module = __import__(package_name)
-            versions[package_name] = getattr(module, '__version__', None)
-        except Exception:
-            versions[package_name] = None
-
-    return {
-        'python_executable': sys.executable,
-        'python_version': platform.python_version(),
-        'platform': platform.platform(),
-        'package_versions': versions,
-        'random_seed_default': settings.RANDOM_SEED
-    }
-
-
-def json_ready(value):
-    if isinstance(value, dict):
-        return {key: json_ready(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [json_ready(item) for item in value]
-    if isinstance(value, tuple):
-        return [json_ready(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if isinstance(value, pd.Timedelta):
-        return str(value)
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if pd.isna(value):
-        return None
-    return value
-
-
-def write_json(payload, output_path):
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open('w', encoding='utf-8') as handle:
-        json.dump(json_ready(payload), handle, indent=2)
-
 
 # -----------------------------------------------------------------------------
 # Feature helpers
