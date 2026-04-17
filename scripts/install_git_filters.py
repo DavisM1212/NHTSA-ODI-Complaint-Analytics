@@ -39,7 +39,7 @@ def main():
     run_git_config("filter.notebookstrip.required", "true")
 
     print("Installed local git filter: notebookstrip")
-    print("Exploration notebooks configured in .gitattributes will be cleared on commit")
+    print("No notebooks are currently wired to the filter in .gitattributes")
     return 0
 
 

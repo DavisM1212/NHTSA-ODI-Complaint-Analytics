@@ -11,6 +11,20 @@ from sklearn.metrics import (
 )
 
 from src.config import settings
+from src.config.contracts import (
+    COMPONENT_MULTILABEL_CASES_STEM,
+    COMPONENT_SINGLE_LABEL_CASES_STEM,
+)
+from src.config.split_policy import (
+    BENCHMARK_SPLIT_MODE,
+    FEATURE_WAVE1_SPLIT_MODE,
+    TRAIN_END,
+    TRAIN_CORE_END,
+    VALID_END,
+    SCREEN_END,
+    SELECT_END,
+    get_split_policy,
+)
 
 # -----------------------------------------------------------------------------
 # Core dataset and split definitions
@@ -19,18 +33,78 @@ ID_COL = 'odino'
 DATE_COL = 'ldate'
 TARGET_COL = 'component_group'
 MULTI_TARGET_COL = 'component_groups'
-TRAIN_END = pd.Timestamp('2024-12-31')
-VALID_END = pd.Timestamp('2025-12-31')
 TRAIN_VALID_END = VALID_END
-TRAIN_CORE_END = pd.Timestamp('2023-12-31')
-SCREEN_END = pd.Timestamp('2024-12-31')
-SELECT_END = pd.Timestamp('2025-12-31')
-SINGLE_INPUT_STEM = 'odi_component_model_cases'
-MULTI_INPUT_STEM = 'odi_component_multilabel_cases'
+SINGLE_INPUT_STEM = COMPONENT_SINGLE_LABEL_CASES_STEM
+MULTI_INPUT_STEM = COMPONENT_MULTILABEL_CASES_STEM
 DEFAULT_SELECTION_SEEDS = [42, 43, 44, 45, 46]
 MAX_TOP_K = 3
-BENCHMARK_SPLIT_MODE = 'benchmark_v1'
-FEATURE_WAVE1_SPLIT_MODE = 'feature_wave1'
+
+STATE_REGION_MAP = {
+    'CT': 'NORTHEAST',
+    'ME': 'NORTHEAST',
+    'MA': 'NORTHEAST',
+    'NH': 'NORTHEAST',
+    'RI': 'NORTHEAST',
+    'VT': 'NORTHEAST',
+    'NJ': 'NORTHEAST',
+    'NY': 'NORTHEAST',
+    'PA': 'NORTHEAST',
+    'IL': 'MIDWEST',
+    'IN': 'MIDWEST',
+    'MI': 'MIDWEST',
+    'OH': 'MIDWEST',
+    'WI': 'MIDWEST',
+    'IA': 'MIDWEST',
+    'KS': 'MIDWEST',
+    'MN': 'MIDWEST',
+    'MO': 'MIDWEST',
+    'NE': 'MIDWEST',
+    'ND': 'MIDWEST',
+    'SD': 'MIDWEST',
+    'DE': 'SOUTH',
+    'FL': 'SOUTH',
+    'GA': 'SOUTH',
+    'MD': 'SOUTH',
+    'NC': 'SOUTH',
+    'SC': 'SOUTH',
+    'VA': 'SOUTH',
+    'DC': 'SOUTH',
+    'WV': 'SOUTH',
+    'AL': 'SOUTH',
+    'KY': 'SOUTH',
+    'MS': 'SOUTH',
+    'TN': 'SOUTH',
+    'AR': 'SOUTH',
+    'LA': 'SOUTH',
+    'OK': 'SOUTH',
+    'TX': 'SOUTH',
+    'AZ': 'WEST',
+    'CO': 'WEST',
+    'ID': 'WEST',
+    'MT': 'WEST',
+    'NV': 'WEST',
+    'NM': 'WEST',
+    'UT': 'WEST',
+    'WY': 'WEST',
+    'AK': 'WEST',
+    'CA': 'WEST',
+    'HI': 'WEST',
+    'OR': 'WEST',
+    'WA': 'WEST',
+    'AS': 'TERRITORY',
+    'FM': 'TERRITORY',
+    'GU': 'TERRITORY',
+    'MH': 'TERRITORY',
+    'MP': 'TERRITORY',
+    'PR': 'TERRITORY',
+    'PW': 'TERRITORY',
+    'VI': 'TERRITORY',
+    'AA': 'MILITARY',
+    'AE': 'MILITARY',
+    'AP': 'MILITARY'
+}
+VEHICLE_AGE_BUCKETS = [-1, 0, 3, 7, 12, 200]
+VEHICLE_AGE_LABELS = ['AGE_0', 'AGE_1_3', 'AGE_4_7', 'AGE_8_12', 'AGE_13_PLUS']
 
 
 # -----------------------------------------------------------------------------
@@ -236,35 +310,6 @@ BENCHMARK_FEATURE_SET_NAMES = [
     'core_plus_stable_incident'
 ]
 
-SPLIT_POLICIES = {
-    BENCHMARK_SPLIT_MODE: {
-        'train_end': TRAIN_END,
-        'valid_end': VALID_END,
-        'train_name': 'train',
-        'valid_name': 'valid_2025',
-        'holdout_name': 'holdout_2026',
-        'selection_train_name': 'train',
-        'selection_eval_name': 'valid_2025',
-        'dev_name': 'dev_2020_2025',
-        'holdout_policy': '2026 holdout untouched during feature selection and tuning'
-    },
-    FEATURE_WAVE1_SPLIT_MODE: {
-        'train_core_end': TRAIN_CORE_END,
-        'screen_end': SCREEN_END,
-        'select_end': SELECT_END,
-        'train_name': 'train_core',
-        'screen_name': 'screen_2024',
-        'select_name': 'select_2025',
-        'holdout_name': 'holdout_2026',
-        'selection_train_name': 'train_core',
-        'selection_eval_name': 'screen_2024',
-        'select_train_name': 'dev_2020_2024',
-        'select_eval_name': 'select_2025',
-        'dev_name': 'dev_2020_2025',
-        'holdout_policy': '2026 holdout untouched during feature-family screening and promotion'
-    }
-}
-
 # -----------------------------------------------------------------------------
 # Feature helpers
 # -----------------------------------------------------------------------------
@@ -335,11 +380,113 @@ def all_feature_columns():
     return dedupe_feature_cols(cols)
 
 
-def get_split_policy(split_mode=BENCHMARK_SPLIT_MODE):
-    if split_mode not in SPLIT_POLICIES:
-        choices = ', '.join(sorted(SPLIT_POLICIES))
-        raise ValueError(f'Unknown split_mode {split_mode}. Choices: {choices}')
-    return SPLIT_POLICIES[split_mode]
+def build_case_sort_keys(df):
+    work = df.copy()
+    work['__odino_num'] = pd.to_numeric(work[ID_COL], errors='coerce')
+    work[DATE_COL] = pd.to_datetime(work[DATE_COL], errors='coerce')
+    return work.sort_values(
+        [DATE_COL, '__odino_num', ID_COL],
+        na_position='last'
+    ).reset_index(drop=True)
+
+
+def derive_vehicle_age_features(df):
+    work = df.copy()
+    work[DATE_COL] = pd.to_datetime(work[DATE_COL], errors='coerce')
+    work['complaint_year'] = work[DATE_COL].dt.year.astype('Int64')
+    work['complaint_month'] = work[DATE_COL].dt.month.astype('Int64')
+    work['complaint_quarter'] = work[DATE_COL].dt.quarter.astype('Int64')
+
+    model_year = pd.to_numeric(work['yeartxt'], errors='coerce')
+    vehicle_age = work['complaint_year'].astype('Float64') - model_year.astype('Float64')
+    vehicle_age = vehicle_age.where(vehicle_age.ge(0))
+    work['vehicle_age_years'] = vehicle_age
+    age_bucket = pd.cut(
+        vehicle_age,
+        bins=VEHICLE_AGE_BUCKETS,
+        labels=VEHICLE_AGE_LABELS,
+        include_lowest=True
+    )
+    work['vehicle_age_bucket'] = age_bucket.astype('string')
+    return work
+
+
+def derive_state_region(df):
+    work = df.copy()
+    state = work['state'].astype('string').str.upper()
+    work['state_region'] = state.map(STATE_REGION_MAP).fillna('UNKNOWN').astype(str)
+    return work
+
+
+def derive_prior_history_features(df):
+    work = build_case_sort_keys(df)
+    work['__event_day'] = work[DATE_COL].dt.normalize()
+    work['__severity_int'] = work['severity_broad_flag'].fillna(False).astype(int)
+
+    history_specs = [
+        ('mfr_name', 'prior_cmpl_mfr_all', 'prior_severity_share_mfr_all'),
+        (['maketxt', 'modeltxt'], 'prior_cmpl_make_model_all', 'prior_severity_share_make_model_all'),
+        (
+            ['maketxt', 'modeltxt', 'yeartxt'],
+            'prior_cmpl_make_model_year_all',
+            'prior_severity_share_make_model_year_all'
+        )
+    ]
+
+    for key_cols, count_name, share_name in history_specs:
+        key_cols = [key_cols] if isinstance(key_cols, str) else list(key_cols)
+        daily_df = (
+            work.groupby(key_cols + ['__event_day'], dropna=False, sort=False)
+            .agg(
+                day_case_count=(ID_COL, 'size'),
+                day_severity_count=('__severity_int', 'sum')
+            )
+            .reset_index()
+        )
+        grouped = daily_df.groupby(key_cols, sort=False, dropna=False)
+        daily_df['__prior_case_count'] = grouped['day_case_count'].cumsum() - daily_df['day_case_count']
+        daily_df['__prior_severity_count'] = grouped['day_severity_count'].cumsum() - daily_df['day_severity_count']
+        daily_df[count_name] = daily_df['__prior_case_count'].astype('Int64')
+        prior_share = daily_df['__prior_severity_count'].astype(float) / daily_df['__prior_case_count'].replace(0, pd.NA)
+        daily_df[share_name] = pd.Series(prior_share, index=daily_df.index).astype('Float64')
+        work = work.merge(
+            daily_df[key_cols + ['__event_day', count_name, share_name]],
+            on=key_cols + ['__event_day'],
+            how='left',
+            validate='many_to_one'
+        )
+
+    return work.drop(columns=['__odino_num', '__event_day', '__severity_int'])
+
+
+def add_requested_case_features(df, feature_cols):
+    work = df.copy()
+    requested = set(feature_cols)
+    missing = requested - set(work.columns)
+
+    age_feature_cols = {
+        'complaint_year',
+        'complaint_month',
+        'complaint_quarter',
+        'vehicle_age_years',
+        'vehicle_age_bucket'
+    }
+    history_feature_cols = {
+        'prior_cmpl_mfr_all',
+        'prior_cmpl_make_model_all',
+        'prior_cmpl_make_model_year_all',
+        'prior_severity_share_mfr_all',
+        'prior_severity_share_make_model_all',
+        'prior_severity_share_make_model_year_all'
+    }
+
+    if missing & age_feature_cols:
+        work = derive_vehicle_age_features(work)
+    if 'state_region' in missing:
+        work = derive_state_region(work)
+    if missing & history_feature_cols:
+        work = derive_prior_history_features(work)
+    return work
 
 
 def validate_unseen_single_label(train_target, eval_target, split_name):
@@ -358,8 +505,11 @@ def require_case_columns(df, feature_cols, target_col=TARGET_COL):
 
 
 def prep_single_label_cases(df, feature_cols):
-    require_case_columns(df, feature_cols, target_col=TARGET_COL)
-    work = df.copy()
+    work = add_requested_case_features(df, feature_cols)
+    if 'single_label_keep_flag' in work.columns:
+        keep_mask = work['single_label_keep_flag'].fillna(False).astype(bool)
+        work = work.loc[keep_mask].copy()
+    require_case_columns(work, feature_cols, target_col=TARGET_COL)
     work[DATE_COL] = pd.to_datetime(work[DATE_COL], errors='coerce')
     if work[DATE_COL].isna().any():
         missing_dates = int(work[DATE_COL].isna().sum())

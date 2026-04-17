@@ -21,7 +21,7 @@ if (-not (Test-Path $PythonExe)) {
     $PythonExe = "python"
 }
 
-Write-Host "NHTSA ODI Complaint Analytics - Windows pipeline runner"
+Write-Host "NHTSA ODI Complaint Analytics - Windows ingest runner"
 Write-Host "Repository root: $RepoRoot"
 Write-Host "Python: $PythonExe"
 
@@ -40,17 +40,17 @@ if ($NoCombine) {
     $moduleArgs += "--no-combine"
 }
 
-Write-Step "Running ODI complaint extraction + preprocessing"
+Write-Step "Running ODI complaint extraction + combine"
 & $PythonExe @moduleArgs
 $pipelineExitCode = $LASTEXITCODE
 
 Write-Host ""
 if ($pipelineExitCode -eq 0) {
-    Write-Host "Pipeline completed"
-    Write-Host "Check data/extracted/, data/processed/, and data/outputs/"
+    Write-Host "Ingest completed"
+    Write-Host "Check data/extracted/ and data/processed/"
 }
 else {
-    Write-Host "Pipeline failed"
+    Write-Host "Ingest failed"
 }
 
 exit $pipelineExitCode

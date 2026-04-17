@@ -19,7 +19,7 @@ from threadpoolctl import threadpool_limits
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_dataframe, write_json
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     DATE_COL,
     FEATURE_SET_DEFS,
     ID_COL,

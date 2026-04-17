@@ -1,4 +1,4 @@
-from src.modeling.component_multilabel import (
+from src.modeling.common.multilabel import (
     build_catboost_model,
     is_retryable_catboost_gpu_error,
 )

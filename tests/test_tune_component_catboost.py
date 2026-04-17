@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from src.modeling.tune_component_catboost import (
+from src.modeling.experiments.component_single_structured_tuning import (
     DEF_SELECTION_EVAL_PERIOD,
     DEFAULT_SEED_TEXT,
     QUICK_FEATURE_SET,

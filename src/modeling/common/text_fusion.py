@@ -26,7 +26,7 @@ from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
 from src.features.component_text_sidecar import SIDECAR_STEM
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     DATE_COL,
     FEATURE_WAVE1_SPLIT_MODE,
     ID_COL,
@@ -53,14 +53,14 @@ from src.modeling.component_common import (
     split_single_label_cases_by_mode,
     subset_case_frame,
 )
-from src.modeling.component_multilabel_shared import (
+from src.modeling.common.multilabel import (
     CATBOOST_NAME,
     DEF_CATBOOST_EVAL_PERIOD,
     DEF_CATBOOST_ITERS,
     fit_catboost_holdout_with_fallback,
     fit_catboost_selection_with_fallback,
 )
-from src.modeling.component_multilabel_shared import (
+from src.modeling.common.multilabel import (
     build_metric_row as build_multilabel_metric_row,
 )
 
@@ -1197,5 +1197,4 @@ def build_multi_overlap_rows(base_row_dict, y_true, pred, proba, overlap_mask):
             )
         )
     return rows
-
 

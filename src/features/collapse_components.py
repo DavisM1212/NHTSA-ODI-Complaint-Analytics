@@ -5,20 +5,32 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import settings
+from src.config.contracts import (
+    COMPONENT_CASE_BASE_STEM,
+    COMPONENT_CONFLICT_NAME,
+    COMPONENT_MULTILABEL_CASES_STEM,
+    COMPONENT_ROWS_STEM,
+    COMPONENT_SINGLE_LABEL_CASES_STEM,
+    COMPONENT_SUMMARY_NAME,
+    COMPONENT_TARGET_GROUP_NAME,
+    COMPONENT_TARGET_SCOPE_NAME,
+)
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
+from src.config.split_policy import BENCHMARK_SPLIT_MODE, get_split_policy
 from src.data.io_utils import write_dataframe
 from src.preprocessing.clean_complaints import add_safe_lag_fields, add_severity_flags
 
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
-INPUT_STEM = 'odi_component_rows'
-CASE_STEM = 'odi_component_model_cases'
-MULTI_CASE_STEM = 'odi_component_multilabel_cases'
-SUMMARY_NAME = 'collapse_components_summary.csv'
-CONFLICT_NAME = 'collapse_components_conflicts.csv'
-TARGET_SCOPE_NAME = 'component_target_scope_summary.csv'
-TARGET_GROUP_NAME = 'component_target_scope_groups.csv'
+INPUT_STEM = COMPONENT_ROWS_STEM
+BASE_CASE_STEM = COMPONENT_CASE_BASE_STEM
+SINGLE_CASE_STEM = COMPONENT_SINGLE_LABEL_CASES_STEM
+MULTI_CASE_STEM = COMPONENT_MULTILABEL_CASES_STEM
+SUMMARY_NAME = COMPONENT_SUMMARY_NAME
+CONFLICT_NAME = COMPONENT_CONFLICT_NAME
+TARGET_SCOPE_NAME = COMPONENT_TARGET_SCOPE_NAME
+TARGET_GROUP_NAME = COMPONENT_TARGET_GROUP_NAME
 
 
 # -----------------------------------------------------------------------------
@@ -150,15 +162,13 @@ CASE_ANY_FLAG_COLS = [
     'veh_speed_zero_flag'
 ]
 
-SINGLE_MODEL_COLS = [
+BASE_CASE_COLS = [
     'odino',
     'source_era',
     'source_zip',
     'source_file',
-    'component_group',
     'component_row_count',
     'component_group_rows',
-    'component_group_case_count',
     'mfr_name',
     'maketxt',
     'modeltxt',
@@ -167,117 +177,38 @@ SINGLE_MODEL_COLS = [
     'ldate',
     'faildate',
     'lag_days_safe',
-    'complaint_year',
-    'complaint_month',
-    'complaint_quarter',
-    'vehicle_age_years',
-    'vehicle_age_bucket',
-    'state_region',
-    'prior_cmpl_mfr_all',
-    'prior_cmpl_make_model_all',
-    'prior_cmpl_make_model_year_all',
-    'prior_severity_share_mfr_all',
-    'prior_severity_share_make_model_all',
-    'prior_severity_share_make_model_year_all',
     'cmpl_type',
     'drive_train',
     'fuel_sys',
     'fuel_type',
     'trans_type',
-    'num_cyls',
     'miles',
     'veh_speed',
     'injured',
-    'deaths',
     'fire',
     'crash',
     'medical_attn',
     'vehicles_towed_yn',
     'police_rpt_yn',
-    'orig_owner_yn',
-    'anti_brakes_yn',
-    'cruise_cont_yn',
     'repaired_yn',
     'miles_missing_flag',
     'veh_speed_missing_flag',
     'miles_zero_flag',
     'veh_speed_zero_flag',
     'faildate_trusted_flag',
-    'faildate_untrusted_flag',
     'severity_primary_flag',
-    'severity_broad_flag',
-    'flag_year_unknown',
-    'flag_year_out_of_range',
-    'flag_speed_high',
-    'flag_miles_high',
-    'flag_date_order_bad',
-    'flag_fail_pre_model',
-    'flag_fail_pre_model_far'
+    'severity_broad_flag'
 ]
 
-MULTI_MODEL_COLS = [
-    'odino',
-    'source_era',
-    'source_zip',
-    'source_file',
+SINGLE_CASE_COLS = BASE_CASE_COLS + [
+    'component_group',
+    'component_group_fit_case_count',
+    'single_label_keep_flag'
+]
+
+MULTI_CASE_COLS = BASE_CASE_COLS + [
     'component_groups',
-    'component_group_count',
-    'component_row_count',
-    'component_group_rows',
-    'mfr_name',
-    'maketxt',
-    'modeltxt',
-    'yeartxt',
-    'state',
-    'ldate',
-    'faildate',
-    'lag_days_safe',
-    'complaint_year',
-    'complaint_month',
-    'complaint_quarter',
-    'vehicle_age_years',
-    'vehicle_age_bucket',
-    'state_region',
-    'prior_cmpl_mfr_all',
-    'prior_cmpl_make_model_all',
-    'prior_cmpl_make_model_year_all',
-    'prior_severity_share_mfr_all',
-    'prior_severity_share_make_model_all',
-    'prior_severity_share_make_model_year_all',
-    'cmpl_type',
-    'drive_train',
-    'fuel_sys',
-    'fuel_type',
-    'trans_type',
-    'num_cyls',
-    'miles',
-    'veh_speed',
-    'injured',
-    'deaths',
-    'fire',
-    'crash',
-    'medical_attn',
-    'vehicles_towed_yn',
-    'police_rpt_yn',
-    'orig_owner_yn',
-    'anti_brakes_yn',
-    'cruise_cont_yn',
-    'repaired_yn',
-    'miles_missing_flag',
-    'veh_speed_missing_flag',
-    'miles_zero_flag',
-    'veh_speed_zero_flag',
-    'faildate_trusted_flag',
-    'faildate_untrusted_flag',
-    'severity_primary_flag',
-    'severity_broad_flag',
-    'flag_year_unknown',
-    'flag_year_out_of_range',
-    'flag_speed_high',
-    'flag_miles_high',
-    'flag_date_order_bad',
-    'flag_fail_pre_model',
-    'flag_fail_pre_model_far'
+    'component_group_count'
 ]
 
 
@@ -413,7 +344,8 @@ def add_state_region(case_df):
 
 def add_prior_history_features(case_df):
     work = build_sort_keys(case_df)
-    severity = work['severity_broad_flag'].fillna(False).astype(int)  # noqa: F841
+    work['__event_day'] = pd.to_datetime(work['ldate'], errors='coerce').dt.normalize()
+    work['__severity_int'] = work['severity_broad_flag'].fillna(False).astype(int)
 
     history_specs = [
         ('mfr_name', 'prior_cmpl_mfr_all', 'prior_severity_share_mfr_all'),
@@ -427,16 +359,28 @@ def add_prior_history_features(case_df):
 
     for key_cols, count_name, share_name in history_specs:
         key_cols = [key_cols] if isinstance(key_cols, str) else list(key_cols)
-        grouped = work.groupby(key_cols, sort=False, dropna=False)
-        prior_count = grouped.cumcount()
-        prior_severity_count = grouped['severity_broad_flag'].transform(
-            lambda s: s.fillna(False).astype(int).cumsum() - s.fillna(False).astype(int)
+        daily_df = (
+            work.groupby(key_cols + ['__event_day'], dropna=False, sort=False)
+            .agg(
+                day_case_count=('odino', 'size'),
+                day_severity_count=('__severity_int', 'sum')
+            )
+            .reset_index()
         )
-        work[count_name] = prior_count.astype('Int64')
-        prior_share = prior_severity_count.astype(float) / prior_count.replace(0, pd.NA)
-        work[share_name] = pd.Series(prior_share, index=work.index).astype('Float64')
+        grouped = daily_df.groupby(key_cols, sort=False, dropna=False)
+        daily_df['__prior_case_count'] = grouped['day_case_count'].cumsum() - daily_df['day_case_count']
+        daily_df['__prior_severity_count'] = grouped['day_severity_count'].cumsum() - daily_df['day_severity_count']
+        daily_df[count_name] = daily_df['__prior_case_count'].astype('Int64')
+        prior_share = daily_df['__prior_severity_count'].astype(float) / daily_df['__prior_case_count'].replace(0, pd.NA)
+        daily_df[share_name] = pd.Series(prior_share, index=daily_df.index).astype('Float64')
+        work = work.merge(
+            daily_df[key_cols + ['__event_day', count_name, share_name]],
+            on=key_cols + ['__event_day'],
+            how='left',
+            validate='many_to_one'
+        )
 
-    return work.drop(columns=['__odino_num'])
+    return work.drop(columns=['__odino_num', '__event_day', '__severity_int'])
 
 
 def add_wave1_case_features(case_df):
@@ -462,7 +406,10 @@ def build_case_tables(component_df):
     if single_rows.empty:
         raise ValueError('No single-label component cases found after filtering')
 
-    base_case_df = add_wave1_case_features(collapse_case_features(keep_df, target_mode='base'))
+    base_case_df = collapse_case_features(keep_df, target_mode='base')
+    base_keep_cols = [column for column in BASE_CASE_COLS if column in base_case_df.columns]
+    base_case_df = base_case_df.loc[:, base_keep_cols].sort_values('odino').reset_index(drop=True)
+
     single_target_df = collapse_case_features(single_rows, target_mode='single')[['odino', 'component_group']]
     single_case_df = base_case_df.loc[base_case_df['odino'].isin(single_ids)].merge(
         single_target_df,
@@ -470,16 +417,23 @@ def build_case_tables(component_df):
         how='left',
         validate='one_to_one'
     )
-    single_case_counts = single_case_df['component_group'].value_counts()
-    single_case_df['component_group_case_count'] = (
+    benchmark_policy = get_split_policy(BENCHMARK_SPLIT_MODE)
+    fit_window_mask = pd.to_datetime(single_case_df['ldate'], errors='coerce').le(benchmark_policy['valid_end'])
+    fit_counts = single_case_df.loc[fit_window_mask, 'component_group'].value_counts()
+    single_case_df['component_group_fit_case_count'] = (
         single_case_df['component_group']
-        .map(single_case_counts)
+        .map(fit_counts)
         .astype('Int64')
     )
-    single_case_df['single_label_keep_flag'] = single_case_df['component_group_case_count'].ge(SINGLE_LABEL_MIN_CASES)
+    single_case_df['single_label_keep_flag'] = (
+        single_case_df['component_group_fit_case_count']
+        .fillna(0)
+        .ge(SINGLE_LABEL_MIN_CASES)
+    )
     single_case_bench_df = single_case_df.loc[single_case_df['single_label_keep_flag']].copy()
-    keep_cols = [column for column in SINGLE_MODEL_COLS if column in single_case_bench_df.columns]
-    single_case_bench_df = single_case_bench_df.loc[:, keep_cols].sort_values('odino').reset_index(drop=True)
+    single_keep_cols = [column for column in SINGLE_CASE_COLS if column in single_case_df.columns]
+    single_case_df = single_case_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
+    single_case_bench_df = single_case_bench_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
 
     multi_target_df = collapse_case_features(keep_df, target_mode='multi')[['odino', 'component_groups', 'component_group_count']]
     multi_case_df = base_case_df.merge(
@@ -488,10 +442,10 @@ def build_case_tables(component_df):
         how='left',
         validate='one_to_one'
     )
-    multi_keep_cols = [column for column in MULTI_MODEL_COLS if column in multi_case_df.columns]
+    multi_keep_cols = [column for column in MULTI_CASE_COLS if column in multi_case_df.columns]
     multi_case_df = multi_case_df.loc[:, multi_keep_cols].sort_values('odino').reset_index(drop=True)
 
-    return keep_df, single_rows, multi_rows, single_case_df, single_case_bench_df, multi_case_df
+    return keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df
 
 
 # -----------------------------------------------------------------------------
@@ -519,9 +473,10 @@ def build_conflict_summary(case_rows, scope_name):
     ).reset_index(drop=True)
 
 
-def build_summary(component_df, keep_df, single_case_df, single_case_bench_df, multi_case_df):
+def build_summary(component_df, keep_df, base_case_df, single_case_df, single_case_bench_df, multi_case_df):
     all_cases = int(component_df['odino'].nunique())
     kept_cases = int(keep_df['odino'].nunique())
+    base_cases = int(base_case_df['odino'].nunique())
     single_cases = int(single_case_df['odino'].nunique())
     benchmark_cases = int(single_case_bench_df['odino'].nunique())
     multi_benchmark_cases = int(multi_case_df['odino'].nunique())
@@ -544,6 +499,10 @@ def build_summary(component_df, keep_df, single_case_df, single_case_bench_df, m
         {
             'metric': 'kept_component_cases',
             'value': kept_cases
+        },
+        {
+            'metric': 'component_case_base_cases',
+            'value': base_cases
         },
         {
             'metric': 'single_label_cases_all',
@@ -585,16 +544,9 @@ def build_summary(component_df, keep_df, single_case_df, single_case_bench_df, m
     return pd.DataFrame(summary_rows)
 
 
-def build_target_scope_summary(keep_df, single_case_df, single_case_bench_df, multi_case_df):
+def build_target_scope_summary(base_case_df, single_case_df, single_case_bench_df, multi_case_df):
     rows = []
-    kept_case_base = (
-        keep_df.groupby('odino', sort=True)
-        .agg(
-            ldate=('ldate', 'first'),
-            severity_broad_flag=('severity_broad_row_flag', 'max')
-        )
-        .reset_index()
-    )
+    kept_case_base = base_case_df[['odino', 'ldate', 'severity_broad_flag']].copy()
     multi_only_df = multi_case_df.loc[multi_case_df['component_group_count'].gt(1)].copy()
     scope_frames = {
         'kept_component_cases': kept_case_base,
@@ -722,9 +674,9 @@ def main():
     ensure_project_directories()
 
     component_df = load_component_rows(args.input_path)
-    keep_df, single_rows, multi_rows, single_case_df, single_case_bench_df, multi_case_df = build_case_tables(component_df)
+    keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df = build_case_tables(component_df)
 
-    summary_df = build_summary(component_df, keep_df, single_case_df, single_case_bench_df, multi_case_df)
+    summary_df = build_summary(component_df, keep_df, base_case_df, single_case_df, single_case_bench_df, multi_case_df)
     conflict_df = pd.concat(
         [
             build_conflict_summary(keep_df, 'all_kept_cases'),
@@ -733,12 +685,17 @@ def main():
         ],
         ignore_index=True
     )
-    target_scope_df = build_target_scope_summary(keep_df, single_case_df, single_case_bench_df, multi_case_df)
+    target_scope_df = build_target_scope_summary(base_case_df, single_case_df, single_case_bench_df, multi_case_df)
     target_group_df = build_target_group_summary(keep_df, single_case_df, single_case_bench_df, multi_rows)
 
-    case_path = write_dataframe(
-        single_case_bench_df,
-        PROCESSED_DATA_DIR / CASE_STEM,
+    base_case_path = write_dataframe(
+        base_case_df,
+        PROCESSED_DATA_DIR / BASE_CASE_STEM,
+        prefer_parquet=args.output_format == 'parquet'
+    )
+    single_case_path = write_dataframe(
+        single_case_df,
+        PROCESSED_DATA_DIR / SINGLE_CASE_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
     multi_case_path = write_dataframe(
@@ -755,7 +712,8 @@ def main():
     target_scope_df.to_csv(target_scope_path, index=False)
     target_group_df.to_csv(target_group_path, index=False)
 
-    print(f'[write] {case_path}')
+    print(f'[write] {base_case_path}')
+    print(f'[write] {single_case_path}')
     print(f'[write] {multi_case_path}')
     print(f'[write] {summary_path}')
     print(f'[write] {conflict_path}')

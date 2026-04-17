@@ -8,10 +8,17 @@ import pandas as pd
 from sklearn.metrics import log_loss
 
 from src.config import settings
+from src.config.contracts import (
+    COMPONENT_SINGLE_OFFICIAL_CALIBRATION,
+    COMPONENT_SINGLE_OFFICIAL_CLASS,
+    COMPONENT_SINGLE_OFFICIAL_CONFUSION,
+    COMPONENT_SINGLE_OFFICIAL_HOLDOUT,
+    COMPONENT_SINGLE_OFFICIAL_MANIFEST,
+)
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
 from src.features.component_text_sidecar import SIDECAR_STEM
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     FEATURE_WAVE1_SPLIT_MODE,
     SINGLE_INPUT_STEM,
     TARGET_COL,
@@ -23,15 +30,10 @@ from src.modeling.component_common import (
     score_multiclass_from_proba,
     split_single_label_cases_by_mode,
 )
-from src.modeling.component_text_shared import (
+from src.modeling.common.text_fusion import (
     FINAL_LINEAR_MODEL_CHOICES,
     FINAL_LINEAR_MODEL_DEFAULT,
     LATE_FUSION_FAMILY,
-    LOCKED_SINGLE_MANIFEST,
-    LOCKED_SINGLE_SELECTION,
-    SINGLE_ECE_WORSE_LIMIT,
-    SINGLE_PROMOTE_HOLDOUT_DELTA,
-    SINGLE_TOP3_DROP_LIMIT,
     STRUCTURED_FEATURE_SET,
     TEXT_ONLY_FAMILY,
     apply_single_fusion_weight,
@@ -40,22 +42,30 @@ from src.modeling.component_text_shared import (
     fit_single_structured_family,
     fit_single_structured_holdout,
     fit_single_text_family,
-    load_json,
     log_line,
     merge_text_sidecar,
-    read_locked_single_ece,
 )
 
-# Workflow owner for post-Wave 2 single-label calibration
-# Runs after component_text_wave2.py and writes the calibrated holdout artifacts
+# Workflow owner for the official single-label component model
+# Fits the locked calibrated late-fusion model directly from the stable case table and text sidecar
 
-WAVE2_MANIFEST = OUTPUTS_DIR / 'component_textwave2_manifest.json'
-GLOBAL_MANIFEST_NAME = 'component_textwave2b_calibration_manifest.json'
-SELECT_GRID_NAME = 'component_single_label_textwave2b_calibration_select_grid.csv'
-HOLDOUT_NAME = 'component_single_label_textwave2b_calibrated_holdout.csv'
-CALIBRATION_NAME = 'component_single_label_textwave2b_calibration.csv'
-CLASS_NAME = 'component_single_label_textwave2b_class_metrics.csv'
-CONFUSION_NAME = 'component_single_label_textwave2b_confusion_major.csv'
+GLOBAL_MANIFEST_NAME = COMPONENT_SINGLE_OFFICIAL_MANIFEST
+SELECT_GRID_NAME = 'component_single_label_official_select_grid.csv'
+HOLDOUT_NAME = COMPONENT_SINGLE_OFFICIAL_HOLDOUT
+CALIBRATION_NAME = COMPONENT_SINGLE_OFFICIAL_CALIBRATION
+CLASS_NAME = COMPONENT_SINGLE_OFFICIAL_CLASS
+CONFUSION_NAME = COMPONENT_SINGLE_OFFICIAL_CONFUSION
+OFFICIAL_TEXT_WEIGHT = 0.75
+OFFICIAL_STRUCTURED_PARAMS = {
+    'bootstrap_type': 'Bernoulli',
+    'border_count': 128,
+    'iterations': 1800,
+    'learning_rate': 0.07405467149893648,
+    'depth': 9,
+    'l2_leaf_reg': 7.572705439311379,
+    'random_strength': 0.29374126086853103,
+    'subsample': 0.6895168484791427
+}
 
 DEFAULT_ALPHA_GRID = [
     0.50,
@@ -180,36 +190,9 @@ def build_holdout_overlap_rows(base_row, y_true, proba, classes, overlap_mask):
         for row in rows
     ]
 
-
-def load_wave2_single_config(fusion_weight_override=None):
-    if not WAVE2_MANIFEST.exists():
-        raise FileNotFoundError(f'Missing Wave 2 manifest: {WAVE2_MANIFEST}')
-    manifest = load_json(WAVE2_MANIFEST)
-    single_entry = manifest.get('tasks', {}).get('single_label', {})
-    selected_family = single_entry.get('selected_family')
-    if selected_family != LATE_FUSION_FAMILY:
-        raise ValueError(
-            f'Wave 2b calibration expects {LATE_FUSION_FAMILY}, '
-            f'but Wave 2 selected {selected_family!r}'
-        )
-
-    fusion_weight = fusion_weight_override
-    if fusion_weight is None:
-        fusion_weight = single_entry.get('screen_fusion_weight')
-    if fusion_weight is None:
-        raise ValueError('Wave 2 manifest does not record screen_fusion_weight')
-
-    return manifest, float(fusion_weight)
-
-
-def load_locked_single_holdout():
-    manifest = load_json(LOCKED_SINGLE_MANIFEST)
-    return manifest['official_holdout_metrics']
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Calibrate Wave 2 single-label text_structured_late_fusion probabilities with select_2025'
+        description='Fit the official calibrated single-label late-fusion component model'
     )
     parser.add_argument(
         '--task-type',
@@ -235,10 +218,14 @@ def parse_args():
     parser.add_argument(
         '--fusion-weight',
         type=float,
-        default=None,
-        help='Override the Wave 2 selected late-fusion text weight',
+        default=OFFICIAL_TEXT_WEIGHT,
+        help='Override the locked official late-fusion text weight',
     )
-    parser.add_argument('--skip-readme-update', action='store_true')
+    parser.add_argument(
+        '--publish-status',
+        default='official',
+        help='Release status recorded in the official manifest'
+    )
     return parser.parse_args()
 
 
@@ -246,11 +233,8 @@ def main():
     args = parse_args()
     ensure_project_directories()
 
-    wave2_manifest, text_weight = load_wave2_single_config(args.fusion_weight)
+    text_weight = float(args.fusion_weight)
     structured_feature_info = feature_manifest(STRUCTURED_FEATURE_SET)
-    locked_selection = load_json(LOCKED_SINGLE_SELECTION)
-    locked_holdout = load_locked_single_holdout()
-    locked_ece = read_locked_single_ece()
 
     raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.single_input_path)
     sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
@@ -264,32 +248,32 @@ def main():
     holdout_df = split_parts['holdout_2026']
 
     log_line(
-        f'[wave2b] rows | dev_screen={len(dev_screen_df):,} '
+        f'[official-single] rows | dev_screen={len(dev_screen_df):,} '
         f'select_2025={len(select_df):,} dev_select={len(dev_select_df):,} '
         f'holdout_2026={len(holdout_df):,}'
     )
     log_line(
-        f'[wave2b] family={LATE_FUSION_FAMILY} text_weight={text_weight:.2f} '
+        f'[official-single] family={LATE_FUSION_FAMILY} text_weight={text_weight:.2f} '
         f'final_linear_model={args.final_linear_model}'
     )
 
     start_total = perf_counter()
-    log_line('[wave2b] fitting select structured branch')
+    log_line('[official-single] fitting select structured branch')
     structured_select = fit_single_structured_family(
         dev_screen_df,
         select_df,
         structured_feature_info,
-        locked_selection['best_params'],
+        OFFICIAL_STRUCTURED_PARAMS,
         task_type=str(args.task_type).upper(),
         devices=args.devices,
         random_seed=args.random_seed,
     )
     log_line(
-        f'[wave2b] select structured fit_seconds={float(structured_select["fit_seconds"]):.2f} '
+        f'[official-single] select structured fit_seconds={float(structured_select["fit_seconds"]):.2f} '
         f'iteration={int(structured_select["selected_iteration"])}'
     )
 
-    log_line('[wave2b] fitting select text branch')
+    log_line('[official-single] fitting select text branch')
     text_select = fit_single_text_family(
         dev_screen_df,
         select_df,
@@ -297,7 +281,7 @@ def main():
         TEXT_ONLY_FAMILY,
         final_model=False,
     )
-    log_line(f'[wave2b] select text fit_seconds={float(text_select["fit_seconds"]):.2f}')
+    log_line(f'[official-single] select text fit_seconds={float(text_select["fit_seconds"]):.2f}')
 
     select_fusion = apply_single_fusion_weight(
         select_df[TARGET_COL].astype(str),
@@ -320,24 +304,24 @@ def main():
     select_grid_df.insert(3, 'selected_text_weight', text_weight)
     select_grid_df.to_csv(OUTPUTS_DIR / SELECT_GRID_NAME, index=False)
     log_line(
-        f'[wave2b] selected alpha={float(selected_alpha["calibration_alpha"]):.3f} '
+        f'[official-single] selected alpha={float(selected_alpha["calibration_alpha"]):.3f} '
         f'select_ece={float(selected_alpha["ece"]):.4f}'
     )
 
-    log_line('[wave2b] fitting holdout structured branch')
+    log_line('[official-single] fitting holdout structured branch')
     structured_holdout = fit_single_structured_holdout(
         dev_select_df,
         holdout_df,
         structured_feature_info,
-        locked_selection['best_params'],
+        OFFICIAL_STRUCTURED_PARAMS,
         structured_select['selected_iteration'],
         task_type=str(args.task_type).upper(),
         devices=args.devices,
         random_seed=args.random_seed,
     )
-    log_line(f'[wave2b] holdout structured fit_seconds={float(structured_holdout["fit_seconds"]):.2f}')
+    log_line(f'[official-single] holdout structured fit_seconds={float(structured_holdout["fit_seconds"]):.2f}')
 
-    log_line('[wave2b] fitting holdout text branch')
+    log_line('[official-single] fitting holdout text branch')
     text_holdout = fit_single_text_family(
         dev_select_df,
         holdout_df,
@@ -346,7 +330,7 @@ def main():
         final_model=True,
         final_model_kind=args.final_linear_model,
     )
-    log_line(f'[wave2b] holdout text fit_seconds={float(text_holdout["fit_seconds"]):.2f}')
+    log_line(f'[official-single] holdout text fit_seconds={float(text_holdout["fit_seconds"]):.2f}')
 
     holdout_fusion = apply_single_fusion_weight(
         holdout_df[TARGET_COL].astype(str),
@@ -446,21 +430,13 @@ def main():
     calibration_df.to_csv(OUTPUTS_DIR / CALIBRATION_NAME, index=False)
 
     holdout_cal_overall = calibration_overall(calibration_df)
-    holdout_macro_gain = float(calibrated_row['macro_f1'] - locked_holdout['macro_f1'])
-    holdout_top3_ok = calibrated_row['top_3_accuracy'] >= (
-        locked_holdout['top_3_accuracy'] - SINGLE_TOP3_DROP_LIMIT
-    )
     holdout_ece = float(holdout_cal_overall['ece'])
-    holdout_ece_ok = (holdout_ece - locked_ece) <= SINGLE_ECE_WORSE_LIMIT
-    promotion_status = 'promoted' if (
-        holdout_macro_gain >= SINGLE_PROMOTE_HOLDOUT_DELTA
-        and holdout_top3_ok
-        and holdout_ece_ok
-    ) else 'rejected_holdout'
+    promotion_status = args.publish_status
 
     manifest = {
-        'artifact_role': 'text_wave2b_calibration',
-        'task': 'single_label',
+        'artifact_role': 'component_single_label_official',
+        'task': 'single_label_component',
+        'official_model': LATE_FUSION_FAMILY,
         'family_name': LATE_FUSION_FAMILY,
         'split_mode': FEATURE_WAVE1_SPLIT_MODE,
         'public_benchmark_locked': True,
@@ -470,22 +446,19 @@ def main():
         'alpha_grid': [float(alpha) for alpha in args.alpha_grid],
         'text_weight': text_weight,
         'structured_feature_set': STRUCTURED_FEATURE_SET,
+        'structured_feature_manifest': structured_feature_info,
+        'structured_branch_params': OFFICIAL_STRUCTURED_PARAMS,
         'final_linear_model': args.final_linear_model,
         'selected_iteration': int(structured_select['selected_iteration']),
-        'locked_holdout_baseline': locked_holdout,
-        'locked_holdout_ece': locked_ece,
         'uncalibrated_holdout_metrics': uncalibrated_row,
         'calibrated_holdout_metrics': calibrated_row,
+        'official_holdout_metrics': calibrated_row,
         'holdout_ece': holdout_ece,
-        'holdout_macro_gain': holdout_macro_gain,
-        'holdout_top3_ok': bool(holdout_top3_ok),
-        'holdout_ece_ok': bool(holdout_ece_ok),
         'promotion_status': promotion_status,
+        'reporting_ready': True,
         'input_path': str(input_path),
         'text_sidecar_path': str(text_sidecar_path),
         'runtime_seconds': round(perf_counter() - start_total, 2),
-        'wave2_manifest': str(WAVE2_MANIFEST),
-        'wave2_manifest_selected_family': wave2_manifest.get('tasks', {}).get('single_label', {}).get('selected_family'),
         'artifacts': {
             'select_grid': str(OUTPUTS_DIR / SELECT_GRID_NAME),
             'holdout': str(OUTPUTS_DIR / HOLDOUT_NAME),
@@ -496,16 +469,8 @@ def main():
     }
     write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
 
-    if not args.skip_readme_update:
-        try:
-            from src.reporting.update_component_readme import update_component_readme
-
-            update_component_readme(single_manifest_path=OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
-        except Exception as exc:
-            print(f'[warn] README benchmark update skipped: {exc}')
-
     log_line(
-        f'[wave2b] holdout calibrated macro_f1={float(calibrated_row["macro_f1"]):.4f} '
+        f'[official-single] holdout calibrated macro_f1={float(calibrated_row["macro_f1"]):.4f} '
         f'top1={float(calibrated_row["top_1_accuracy"]):.4f} '
         f'top3={float(calibrated_row["top_3_accuracy"]):.4f} '
         f'ece={holdout_ece:.4f} '

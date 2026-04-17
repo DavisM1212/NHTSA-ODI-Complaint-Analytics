@@ -26,7 +26,7 @@ from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
 from src.features.component_text_sidecar import SIDECAR_STEM
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     DATE_COL,
     FEATURE_WAVE1_SPLIT_MODE,
     ID_COL,
@@ -57,7 +57,7 @@ from src.modeling.component_common import (
 # Workflow owner for Wave 2 text and fusion comparisons
 # Uses locked benchmark outputs plus the text sidecar, while component_text_shared.py holds the reusable helper layer
 # Keep the reusable Wave 2 helper layer centralized while this module owns orchestration
-from src.modeling.component_text_shared import *
+from src.modeling.common.text_fusion import *
 
 
 def log_single_family(stage_name, family_name, row):

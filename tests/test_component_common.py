@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     FEATURE_WAVE1_SPLIT_MODE,
     apply_multilabel_threshold,
     compose_feature_manifest,
@@ -13,10 +13,11 @@ from src.modeling.component_common import (
 )
 
 
-def build_case_row(case_id, label, ldate):
+def build_case_row(case_id, label, ldate, keep_flag=True):
     return {
         'odino': str(case_id),
         'component_group': label,
+        'single_label_keep_flag': keep_flag,
         'mfr_name': 'MFR',
         'maketxt': 'MAKE',
         'modeltxt': 'MODEL',
@@ -45,6 +46,7 @@ def build_case_row(case_id, label, ldate):
         'flag_date_order_bad': False,
         'flag_fail_pre_model': False,
         'flag_fail_pre_model_far': False,
+        'severity_broad_flag': False,
         'ldate': ldate
     }
 
@@ -100,6 +102,50 @@ def test_compose_feature_manifest_tracks_added_and_removed_columns():
     assert 'fire' not in feature_info['feature_cols']
 
 
+def test_prep_single_label_cases_derives_model_specific_features_from_lean_tables():
+    feature_info = compose_feature_manifest(
+        'wave1_temporal_family',
+        add_cols=[
+            'complaint_year',
+            'complaint_month',
+            'complaint_quarter',
+            'vehicle_age_years',
+            'vehicle_age_bucket',
+            'state_region',
+            'prior_cmpl_mfr_all',
+            'prior_severity_share_mfr_all'
+        ]
+    )
+    df = pd.DataFrame(
+        [
+            build_case_row(1, 'ENGINE / COOLING', '2023-01-05'),
+            build_case_row(2, 'ENGINE / COOLING', '2024-01-05'),
+            build_case_row(3, 'ENGINE / COOLING', '2024-01-05'),
+            build_case_row(4, 'ENGINE / COOLING', '2026-01-05', keep_flag=False)
+        ]
+    )
+    df.loc[df['odino'].eq('2'), 'state'] = 'zz'
+    df.loc[df['odino'].eq('2'), 'severity_broad_flag'] = True
+    df.loc[df['odino'].eq('3'), 'severity_broad_flag'] = True
+
+    prepared = prep_single_label_cases(df, feature_info['feature_cols'])
+
+    assert prepared['odino'].tolist() == ['1', '2', '3']
+
+    row_1 = prepared.loc[prepared['odino'].eq('1')].iloc[0]
+    row_2 = prepared.loc[prepared['odino'].eq('2')].iloc[0]
+    row_3 = prepared.loc[prepared['odino'].eq('3')].iloc[0]
+
+    assert int(row_1['complaint_year']) == 2023
+    assert row_2['state_region'] == 'UNKNOWN'
+    assert float(row_1['vehicle_age_years']) == 3.0
+    assert int(row_1['prior_cmpl_mfr_all']) == 0
+    assert int(row_2['prior_cmpl_mfr_all']) == 1
+    assert int(row_3['prior_cmpl_mfr_all']) == 1
+    assert pd.isna(row_1['prior_severity_share_mfr_all'])
+    assert float(row_2['prior_severity_share_mfr_all']) == 0.0
+
+
 def test_split_single_label_cases_by_mode_builds_feature_wave_frames():
     feature_info = compose_feature_manifest(
         'wave1_geo_family',
@@ -113,12 +159,6 @@ def test_split_single_label_cases_by_mode_builds_feature_wave_frames():
             build_case_row(4, 'ENGINE / COOLING', '2026-01-01')
         ]
     )
-    df['complaint_year'] = [2023, 2024, 2025, 2026]
-    df['complaint_month'] = [1, 1, 1, 1]
-    df['complaint_quarter'] = [1, 1, 1, 1]
-    df['vehicle_age_years'] = [3, 4, 5, 6]
-    df['vehicle_age_bucket'] = ['AGE_1_3', 'AGE_4_7', 'AGE_4_7', 'AGE_4_7']
-    df['state_region'] = ['SOUTH', 'SOUTH', 'SOUTH', 'SOUTH']
 
     prepared = prep_single_label_cases(df, feature_info['feature_cols'])
     split_parts = split_single_label_cases_by_mode(prepared, split_mode=FEATURE_WAVE1_SPLIT_MODE)
@@ -137,9 +177,6 @@ def test_subset_case_frame_keeps_only_requested_columns():
         add_cols=['state_region', 'complaint_year']
     )
     df = pd.DataFrame([build_case_row(1, 'ENGINE / COOLING', '2024-01-01')])
-    df['state_region'] = ['SOUTH']
-    df['complaint_year'] = [2024]
-    df['extra_col'] = ['ignore_me']
 
     prepared = prep_single_label_cases(df, feature_info['feature_cols'])
     subset = subset_case_frame(prepared, ['mfr_name', 'state_region', 'complaint_year'])

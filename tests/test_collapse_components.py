@@ -59,54 +59,55 @@ def make_component_row(case_id, cmplid, component_group, ldate='2024-01-01'):
     }
 
 
-def test_case_level_threshold_and_multilabel_table():
+def test_case_tables_split_base_single_and_multi_contracts():
     rows = []
     for case_id in range(1, 251):
-        rows.append(make_component_row(case_id, case_id, 'ENGINE / COOLING'))
+        rows.append(make_component_row(case_id, case_id, 'ENGINE / COOLING', ldate='2024-01-01'))
 
-    rows.append(make_component_row(999, 9991, 'PARKING BRAKE'))
-    rows.append(make_component_row(1000, 10001, 'LANE DEPARTURE'))
-    rows.append(make_component_row(1000, 10002, 'ELECTRONIC STABILITY CONTROL (ESC)'))
+    rows.append(make_component_row(999, 9991, 'PARKING BRAKE', ldate='2024-01-01'))
+    rows.append(make_component_row(1000, 10001, 'LANE DEPARTURE', ldate='2025-01-01'))
+    rows.append(make_component_row(1000, 10002, 'ELECTRONIC STABILITY CONTROL (ESC)', ldate='2025-01-01'))
 
     component_df = pd.DataFrame(rows)
-    keep_df, single_rows, multi_rows, single_case_df, single_case_bench_df, multi_case_df = build_case_tables(component_df)
+    keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df = build_case_tables(component_df)
 
     assert len(keep_df) == len(component_df)
+    assert len(base_case_df) == 252
     assert len(single_case_df) == 251
     assert len(single_case_bench_df) == 250
-    assert 'PARKING BRAKE' not in single_case_bench_df['component_group'].tolist()
     assert len(multi_rows['odino'].unique()) == 1
     assert len(multi_case_df) == 252
+
     multi_case = multi_case_df.loc[multi_case_df['odino'].eq('1000'), 'component_groups'].iloc[0]
     assert multi_case == 'ELECTRONIC STABILITY CONTROL (ESC)|LANE DEPARTURE'
-    assert {'complaint_year', 'vehicle_age_years', 'state_region', 'prior_cmpl_mfr_all'}.issubset(single_case_bench_df.columns)
-    assert {'complaint_year', 'vehicle_age_years', 'state_region', 'prior_cmpl_mfr_all'}.issubset(multi_case_df.columns)
+
+    for frame in [base_case_df, single_case_df, multi_case_df]:
+        assert 'complaint_year' not in frame.columns
+        assert 'vehicle_age_years' not in frame.columns
+        assert 'state_region' not in frame.columns
+        assert 'prior_cmpl_mfr_all' not in frame.columns
+
+    assert 'component_group_fit_case_count' in single_case_df.columns
+    assert 'single_label_keep_flag' in single_case_df.columns
+    assert 'component_group_count' in multi_case_df.columns
 
 
-def test_wave1_case_features_are_temporal_and_region_safe():
-    rows = [
-        make_component_row(1, 11, 'ENGINE / COOLING', ldate='2023-01-05'),
-        make_component_row(2, 21, 'ENGINE / COOLING', ldate='2024-01-05'),
-        make_component_row(3, 31, 'ENGINE / COOLING', ldate='2024-01-05'),
-        make_component_row(4, 41, 'ENGINE / COOLING', ldate='2025-01-05')
-    ]
-    rows[1]['state'] = 'zz'
-    rows[2]['state'] = 'nc'
-    rows[3]['yeartxt'] = None
+def test_single_label_keep_flag_uses_preholdout_fit_window_only():
+    rows = []
+    for case_id in range(1, 251):
+        rows.append(make_component_row(case_id, case_id, 'ENGINE / COOLING', ldate='2025-06-01'))
+
+    for offset in range(251, 401):
+        rows.append(make_component_row(offset, offset, 'PARKING BRAKE', ldate='2026-02-01'))
 
     component_df = pd.DataFrame(rows)
-    _, _, _, single_case_df, _, multi_case_df = build_case_tables(component_df)
+    _, _, _, _, single_case_df, single_case_bench_df, _ = build_case_tables(component_df)
 
-    row_1 = single_case_df.loc[single_case_df['odino'].eq('1')].iloc[0]
-    row_2 = single_case_df.loc[single_case_df['odino'].eq('2')].iloc[0]
-    row_3 = single_case_df.loc[single_case_df['odino'].eq('3')].iloc[0]
-    row_4 = single_case_df.loc[single_case_df['odino'].eq('4')].iloc[0]
+    engine_row = single_case_df.loc[single_case_df['component_group'].eq('ENGINE / COOLING')].iloc[0]
+    parking_row = single_case_df.loc[single_case_df['component_group'].eq('PARKING BRAKE')].iloc[0]
 
-    assert int(row_1['prior_cmpl_mfr_all']) == 0
-    assert int(row_2['prior_cmpl_mfr_all']) == 1
-    assert int(row_3['prior_cmpl_mfr_all']) == 2
-    assert row_2['state_region'] == 'UNKNOWN'
-    assert row_3['state_region'] == 'SOUTH'
-    assert float(row_1['vehicle_age_years']) >= 0
-    assert pd.isna(row_4['vehicle_age_years'])
-    assert 'state_region' in multi_case_df.columns
+    assert int(engine_row['component_group_fit_case_count']) == 250
+    assert bool(engine_row['single_label_keep_flag']) is True
+    assert pd.isna(parking_row['component_group_fit_case_count']) or int(parking_row['component_group_fit_case_count']) == 0
+    assert bool(parking_row['single_label_keep_flag']) is False
+    assert 'PARKING BRAKE' not in single_case_bench_df['component_group'].tolist()

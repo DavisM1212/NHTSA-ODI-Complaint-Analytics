@@ -12,15 +12,15 @@ else
   PYTHON_BIN="python"
 fi
 
-printf 'NHTSA ODI Complaint Analytics - macOS/Linux pipeline runner\n'
+printf 'NHTSA ODI Complaint Analytics - macOS/Linux ingest runner\n'
 printf 'Repository root: %s\n' "$REPO_ROOT"
 printf 'Python: %s\n' "$PYTHON_BIN"
 
 printf '\n==> Running install verification\n'
 "$PYTHON_BIN" scripts/verify_install.py
 
-printf '\n==> Running ODI complaint extraction + preprocessing\n'
+printf '\n==> Running ODI complaint extraction + combine\n'
 "$PYTHON_BIN" -m src.data.ingest_odi "$@"
 
-printf '\nPipeline completed\n'
-printf 'Check data/extracted/, data/processed/, and data/outputs/\n'
+printf '\nIngest completed\n'
+printf 'Check data/extracted/ and data/processed/\n'

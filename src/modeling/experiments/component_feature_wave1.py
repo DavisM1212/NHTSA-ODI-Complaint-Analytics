@@ -13,7 +13,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import json_ready, load_frame, write_json
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     DEFAULT_SELECTION_SEEDS,
     FEATURE_WAVE1_SPLIT_MODE,
     MULTI_INPUT_STEM,
@@ -39,15 +39,15 @@ from src.modeling.component_common import (
     split_single_label_cases_by_mode,
     subset_case_frame,
 )
-from src.modeling.component_multilabel_shared import (
+from src.modeling.common.multilabel import (
     CATBOOST_NAME,
     fit_catboost_holdout_with_fallback,
     fit_catboost_selection_with_fallback,
 )
-from src.modeling.component_multilabel_shared import (
+from src.modeling.common.multilabel import (
     build_metric_row as build_multilabel_metric_row,
 )
-from src.modeling.component_tuning_shared import (
+from src.modeling.experiments.tuning_shared import (
     evaluate_params_across_seeds,
     summarize_seed_metrics,
 )

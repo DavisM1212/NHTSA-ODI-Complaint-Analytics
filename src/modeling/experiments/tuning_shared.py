@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.modeling.component_common import fit_catboost_with_external_selection
+from src.modeling.common.core import fit_catboost_with_external_selection
 
 # Shared CatBoost tuning helpers reused by entrypoints
 # Read src/modeling/README.md or tune_component_catboost.py first for workflow order

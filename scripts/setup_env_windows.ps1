@@ -140,7 +140,7 @@ $verifyExitCode = $LASTEXITCODE
 Write-Host ""
 if ($verifyExitCode -eq 0) {
     Write-Host "Setup completed successfully"
-    Write-Host "Next step: .\\scripts\\run_pipeline_windows.ps1"
+    Write-Host "Next step: .\\scripts\\run_ingest_windows.ps1 or .\\scripts\\run_component_official_windows.ps1"
     Write-Host "Exploration notebooks listed in .gitattributes will be auto-cleared on commit"
 }
 else {

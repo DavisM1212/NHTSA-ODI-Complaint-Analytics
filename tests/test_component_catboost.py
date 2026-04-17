@@ -2,8 +2,11 @@ import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression
 
-from src.modeling.component_catboost import build_logistic_pipeline, fit_histgb_stage
-from src.modeling.component_common import feature_manifest
+from src.modeling.common.core import feature_manifest
+from src.modeling.experiments.component_single_structured_baseline import (
+    build_logistic_pipeline,
+    fit_histgb_stage,
+)
 
 
 def test_build_logistic_pipeline_matches_installed_sklearn_signature():

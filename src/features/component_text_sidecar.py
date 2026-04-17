@@ -5,21 +5,25 @@ import sys
 import pandas as pd
 
 from src.config import settings
-from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
-from src.data.io_utils import load_frame, write_dataframe
-from src.modeling.component_common import (
-    FEATURE_WAVE1_SPLIT_MODE,
-    MULTI_INPUT_STEM,
-    get_split_policy,
+from src.config.contracts import (
+    CLEANED_COMPLAINTS_STEM,
+    COMPONENT_CASE_BASE_STEM,
+    COMPONENT_TEXT_CONFLICT_NAME,
+    COMPONENT_TEXT_OVERLAP_NAME,
+    COMPONENT_TEXT_SIDECAR_STEM,
 )
+from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
+from src.config.split_policy import FEATURE_WAVE1_SPLIT_MODE, get_split_policy
+from src.data.io_utils import load_frame, write_dataframe
 
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
-CLEAN_STEM = 'odi_complaints_cleaned'
-SIDECAR_STEM = 'odi_component_text_sidecar'
-CONFLICT_NAME = 'component_text_sidecar_conflicts.csv'
-OVERLAP_NAME = 'component_text_overlap_report.csv'
+CLEAN_STEM = CLEANED_COMPLAINTS_STEM
+BASE_INPUT_STEM = COMPONENT_CASE_BASE_STEM
+SIDECAR_STEM = COMPONENT_TEXT_SIDECAR_STEM
+CONFLICT_NAME = COMPONENT_TEXT_CONFLICT_NAME
+OVERLAP_NAME = COMPONENT_TEXT_OVERLAP_NAME
 
 
 # -----------------------------------------------------------------------------
@@ -233,9 +237,9 @@ def parse_args():
         help='Optional path to the cleaned complaints parquet or csv file'
     )
     parser.add_argument(
-        '--multi-input-path',
+        '--base-input-path',
         default=None,
-        help='Optional path to the component multi-label case parquet or csv file'
+        help='Optional path to the component case base parquet or csv file'
     )
     parser.add_argument(
         '--output-format',
@@ -251,8 +255,8 @@ def main():
     ensure_project_directories()
 
     clean_df, clean_path = load_frame(CLEAN_STEM, input_path=args.cleaned_input_path)
-    multi_df, multi_path = load_frame(MULTI_INPUT_STEM, input_path=args.multi_input_path)
-    odino_universe = multi_df['odino'].dropna().astype(str).unique().tolist()
+    base_df, base_path = load_frame(BASE_INPUT_STEM, input_path=args.base_input_path)
+    odino_universe = base_df['odino'].dropna().astype(str).unique().tolist()
 
     sidecar_df, base_df = select_best_text_rows(clean_df, odino_universe)
     conflict_df = build_conflict_report(base_df, sidecar_df)
@@ -269,7 +273,7 @@ def main():
     overlap_df.to_csv(overlap_path, index=False)
 
     print(f'[input] cleaned={clean_path}')
-    print(f'[input] multi={multi_path}')
+    print(f'[input] base={base_path}')
     print(f'[write] {sidecar_path}')
     print(f'[write] {conflict_path}')
     print(f'[write] {overlap_path}')

@@ -3,7 +3,7 @@ from time import perf_counter
 import numpy as np
 from catboost import CatBoostClassifier, CatBoostError
 
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     MAX_TOP_K,
     apply_multilabel_threshold,
     prep_catboost_frames,

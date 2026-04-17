@@ -9,7 +9,7 @@ This repository is designed for a DSBA 6156 (Machine Learning) group project. Th
 - easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
 
-The current workflow already covers complaint ingestion, EDA, audited cleaning, single-label and multi-label component target construction, structured component benchmarks, and a promoted complaint-narrative single-label component model. The next major steps are complaint severity ranking and NLP-driven early warning beyond component classification.
+The current workflow already covers complaint ingestion, EDA, audited cleaning, lean shared complaint contracts, single-label and multi-label component target construction, and one official component pipeline with separate reporting. The next major steps are complaint severity ranking and NLP-driven early warning beyond component classification.
 
 ## Project Overview
 
@@ -36,24 +36,25 @@ The repo is now beyond the initial scaffold stage. Current completed work includ
 - `src/preprocessing/clean_complaints.py`: reproducible shared cleaning pipeline
 - `src/features/collapse_components.py`: single-label and multi-label component case table builder
 - `notebooks/Component_Modeling.ipynb`: exploratory modeling workflow for the original single-label benchmark
-- `src/modeling/tune_component_catboost.py`: canonical single-label feature selection + focused CatBoost model selection
-- `src/modeling/component_catboost.py`: final single-label benchmark with baselines and untouched 2026 holdout scoring
-- `src/modeling/component_multilabel.py`: multi-label routing benchmark on the full kept-case problem
+- `src/modeling/official/component_single_text_calibrated.py`: official single-label component benchmark
+- `src/modeling/official/component_multi_routing.py`: official multi-label routing benchmark
+- `src/modeling/experiments/component_single_structured_tuning.py`: focused structured single-label tuning
+- `src/modeling/experiments/component_single_structured_baseline.py`: structured single-label benchmark baseline
 - `src/features/component_text_sidecar.py`: shared component narrative sidecar for leakage-aware text modeling
-- `src/modeling/component_text_wave2.py`: Wave 2 text-feature experiment runner for component modeling
-- `src/modeling/component_text_wave2b_calibration.py`: promoted calibrated single-label component benchmark
+- `src/modeling/experiments/component_text_wave2.py`: Wave 2 text-feature experiment runner for component modeling
+- `src/modeling/experiments/component_feature_wave1.py`: structured feature-family sweep runner
 - `notebooks/Severity_Ranking_Framework.ipynb`: scaffold for severity ranking
 - `notebooks/NLP_Early_Warning_Framework.ipynb`: scaffold for monthly early-warning watchlists
 
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
 
-This section is generated from the benchmark manifests in `data/outputs/`.
+This section is generated from the official component manifests in `data/outputs/`.
 The official published component-model scores come from the untouched `2026` holdout.
 
 #### Single-label component benchmark
 
-- Scope: scoped benchmark on the single-label complaint subset
+- Scope: official single-label component complaint benchmark
 - Model: `text_structured_late_fusion`
 - Inputs: complaint narrative text + `wave1_incident_cohort_history` structured companion features
 - Text weight: `0.75`
@@ -67,7 +68,7 @@ The official published component-model scores come from the untouched `2026` hol
 
 #### Multi-label routing benchmark
 
-- Scope: full kept-case complaint routing benchmark
+- Scope: official multi-label complaint routing benchmark
 - Model: `CatBoost MultiLabel`
 - Feature set: `core_structured`
 - Threshold: `0.2`
@@ -164,8 +165,10 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |-- scripts/
 |   |-- setup_env_windows.ps1
 |   |-- setup_env_mac_linux.sh
-|   |-- run_pipeline_windows.ps1
-|   |-- run_pipeline_mac_linux.sh
+|   |-- run_ingest_windows.ps1
+|   |-- run_ingest_mac_linux.sh
+|   |-- run_component_official_windows.ps1
+|   |-- run_component_official_mac_linux.sh
 |   |-- verify_install.py
 |   |-- install_git_filters.py
 |   `-- git_notebook_filter.py
@@ -180,6 +183,8 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |-- config/
     |   |-- paths.py
     |   |-- constants.py
+    |   |-- contracts.py
+    |   |-- split_policy.py
     |   `-- settings.py
     |-- data/
     |   |-- ingest_odi.py
@@ -192,11 +197,9 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |   |-- collapse_components.py
     |   `-- component_text_sidecar.py
     |-- modeling/
-    |   |-- component_catboost.py
-    |   |-- component_multilabel.py
-    |   |-- component_text_wave2.py
-    |   |-- component_text_wave2b_calibration.py
-    |   `-- tune_component_catboost.py
+    |   |-- common/
+    |   |-- official/
+    |   `-- experiments/
     |-- evaluation/
     |-- nlp/
     |-- signals/
@@ -312,9 +315,11 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Current key outputs include:
   - `odi_complaints_combined.parquet`
   - `odi_complaints_cleaned.parquet`
+  - `odi_complaints_cleaning_audit.parquet`
   - `odi_severity_cases.parquet`
   - `odi_component_rows.parquet`
-  - `odi_component_model_cases.parquet`
+  - `odi_component_case_base.parquet`
+  - `odi_component_single_label_cases.parquet`
   - `odi_component_multilabel_cases.parquet`
   - `odi_component_text_sidecar.parquet`
 - Ignored by Git
@@ -326,12 +331,11 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Current examples include:
   - `clean_complaints_summary.csv`
   - `collapse_components_summary.csv`
-  - `component_single_label_selection_manifest.json`
-  - `component_single_label_benchmark_metrics.csv`
-  - `component_textwave2b_calibration_manifest.json`
+  - `component_single_label_official_manifest.json`
+  - `component_multilabel_official_manifest.json`
   - `component_official_benchmark_summary.csv`
-  - `component_single_label_feature_importance.csv`
-  - `component_multilabel_metrics.csv`
+  - `component_single_label_official_holdout.csv`
+  - `component_multilabel_official_metrics.csv`
 - Mostly ignored by Git, except selected official summary artifacts such as the component benchmark summary files
 
 `docs/figures/component_models/`
@@ -359,7 +363,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `scripts/install_git_filters.py`
 
 - Installs the repo's local Git filters after environment setup
-- Enables automatic output clearing on commit for exploration notebooks listed in `.gitattributes`
+- Keeps the optional notebook filter available, even though the canonical analysis notebooks are no longer wired to it by default
 
 `scripts/git_notebook_filter.py`
 
@@ -370,17 +374,26 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Repo hygiene script used locally and in GitHub Actions
 - Verifies committed raw zip hashes against `data/raw/SHA256SUMS.txt`
-- Checks that exploration notebooks marked in `.gitattributes` are committed with cleared outputs
 
-`scripts/run_pipeline_windows.ps1`
+`scripts/run_ingest_windows.ps1`
 
-- Windows pipeline runner
-- Runs verification and then the complaint extraction/preprocessing pipeline
+- Windows ingest runner
+- Runs verification and then the complaint extraction/combine step
 
-`scripts/run_pipeline_mac_linux.sh`
+`scripts/run_ingest_mac_linux.sh`
 
-- macOS/Linux pipeline runner
-- Runs verification and then the complaint extraction/preprocessing pipeline
+- macOS/Linux ingest runner
+- Runs verification and then the complaint extraction/combine step
+
+`scripts/run_component_official_windows.ps1`
+
+- Windows official component runner
+- Runs the durable component pipeline end to end: clean -> case tables -> text sidecar -> official models -> reporting
+
+`scripts/run_component_official_mac_linux.sh`
+
+- macOS/Linux official component runner
+- Runs the durable component pipeline end to end: clean -> case tables -> text sidecar -> official models -> reporting
 
 ### `notebooks/` (interactive, cell-by-cell exploration)
 
@@ -546,7 +559,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Make scripts executable, then run setup:
 
 ```bash
-chmod +x scripts/setup_env_mac_linux.sh scripts/run_pipeline_mac_linux.sh
+chmod +x scripts/setup_env_mac_linux.sh scripts/run_ingest_mac_linux.sh scripts/run_component_official_mac_linux.sh
 ./scripts/setup_env_mac_linux.sh
 ```
 
@@ -668,40 +681,44 @@ Important local-processing design choices:
 
 1. Run setup script (`setup_env_*`)
 2. Confirm verification passes (`verify_install.py` runs automatically)
-3. Run the pipeline script (`run_pipeline_*`)
-4. Inspect outputs in `data/processed/` and manifests in `data/outputs/`
-5. Run cleaning / feature table builders as needed
-6. Run modeling scripts as needed
+3. Run ingest if you need to rebuild complaint inputs (`run_ingest_*`)
+4. Run the official component pipeline when you need the durable component artifacts (`run_component_official_*`)
+5. Inspect outputs in `data/processed/` and manifests in `data/outputs/`
+6. Use notebooks or experiment scripts only when you intentionally want exploratory work
 
-### Run the pipeline (Windows)
-
-```powershell
-.\scripts\run_pipeline_windows.ps1
-```
-
-Optional flags (changes output from parquet to csv, overwrites existing extracted files, prevents file combining):
+### Run ingest only (Windows)
 
 ```powershell
-.\scripts\run_pipeline_windows.ps1 -OutputFormat csv
-.\scripts\run_pipeline_windows.ps1 -OverwriteExtracted
-.\scripts\run_pipeline_windows.ps1 -NoCombine
+.\scripts\run_ingest_windows.ps1
 ```
 
-### Run the pipeline (macOS / Linux)
+Optional flags:
+
+```powershell
+.\scripts\run_ingest_windows.ps1 -OutputFormat csv
+.\scripts\run_ingest_windows.ps1 -OverwriteExtracted
+.\scripts\run_ingest_windows.ps1 -NoCombine
+```
+
+### Run ingest only (macOS / Linux)
 
 ```bash
-./scripts/run_pipeline_mac_linux.sh
+./scripts/run_ingest_mac_linux.sh
 ```
 
-Optional flags (changes output from parquet to csv, overwrites existing extracted files, prevents file combining):
+### Run the official component pipeline (Windows)
+
+```powershell
+.\scripts\run_component_official_windows.ps1
+```
+
+### Run the official component pipeline (macOS / Linux)
 
 ```bash
-./scripts/run_pipeline_mac_linux.sh --output-format csv
-./scripts/run_pipeline_mac_linux.sh --overwrite-extracted
-./scripts/run_pipeline_mac_linux.sh --no-combine
+./scripts/run_component_official_mac_linux.sh
 ```
 
-### What the current ingestion pipeline does
+### What the ingestion step does
 
 `src/data/ingest_odi.py` currently:
 
@@ -714,16 +731,16 @@ Optional flags (changes output from parquet to csv, overwrites existing extracte
 - optionally builds a combined complaint dataset
 - writes run manifests and simple summaries to `data/outputs/`
 
-### Run the current cleaning and modeling flow manually
+### Run the official component flow manually
 
-After raw ingestion, the current analysis flow is:
+After raw ingestion, the durable component flow is:
 
 1. shared cleaning
-2. component case collapse
+2. component row and case-table build
 3. component narrative sidecar build
-4. structured single-label model selection and benchmark
-5. promoted single-label text calibration benchmark
-6. multi-label routing benchmark
+4. official single-label model
+5. official multi-label model
+6. reporting refresh
 
 #### Shared cleaning
 
@@ -743,50 +760,16 @@ After raw ingestion, the current analysis flow is:
 .\.venv\Scripts\python.exe -m src.features.component_text_sidecar --output-format parquet
 ```
 
-#### Structured single-label model selection
+#### Official single-label component model
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type CPU --n-trials 40 --seed-list 42,43,44,45,46
+.\.venv\Scripts\python.exe -m src.modeling.official.component_single_text_calibrated --task-type CPU
 ```
 
-For a lighter local shakeout run that starts reporting progress immediately and skips the feature sweep unless you override it:
+#### Official multi-label routing model
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --quick
-```
-
-If you want a middle ground instead of the full canonical run, keep your own trial count and seeds but bypass the feature sweep explicitly:
-
-```powershell
-.\.venv\Scripts\python.exe -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --feature-set core_structured --n-trials 12 --seed-list 42,43
-```
-
-#### Structured single-label holdout benchmark
-
-```powershell
-.\.venv\Scripts\python.exe -m src.modeling.component_catboost --task-type CPU
-```
-
-For GPU runtimes that reproduce the repo artifact contract:
-
-```bash
-python -m src.modeling.tune_component_catboost --task-type GPU --devices 0 --n-trials 40 --seed-list 42,43,44,45,46
-python -m src.modeling.component_catboost --task-type GPU --devices 0
-```
-
-#### Promoted single-label text benchmark
-
-The official single-label component result is the calibrated Wave 2b text + structured late-fusion model. It depends on the component text sidecar and the Wave 2 experiment manifest.
-
-```powershell
-.\.venv\Scripts\python.exe -m src.modeling.component_text_wave2 --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
-.\.venv\Scripts\python.exe -m src.modeling.component_text_wave2b_calibration --task-type GPU --devices 0 --final-linear-model sgd --alpha-grid 1,1.25,1.5,1.75,2,2.5,3,4,5,6,8
-```
-
-#### Multi-label routing benchmark
-
-```powershell
-.\.venv\Scripts\python.exe -m src.modeling.component_multilabel
+.\.venv\Scripts\python.exe -m src.modeling.official.component_multi_routing --task-type CPU
 ```
 
 #### Refresh generated reporting
@@ -801,7 +784,35 @@ The official single-label component result is the calibrated Wave 2b text + stru
 .\.venv\Scripts\python.exe -m src.reporting.component_visuals
 ```
 
-These commands produce the benchmark tables, manifests, official summary artifacts, generated README benchmark section, and presentation figures under `docs/figures/component_models/`.
+### Run experiment entrypoints manually
+
+These are still available, but they are not part of the official reporting contract.
+
+#### Structured single-label tuning
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.experiments.component_single_structured_tuning --task-type CPU --n-trials 40 --seed-list 42,43,44,45,46
+```
+
+#### Structured single-label benchmark baseline
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.experiments.component_single_structured_baseline --task-type CPU
+```
+
+#### Wave 1 structured feature sweep
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.experiments.component_feature_wave1 --task-type GPU --devices 0
+```
+
+#### Wave 2 text and fusion exploration
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.experiments.component_text_wave2 --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
+```
+
+These commands produce the official benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/`.
 
 ## Git Basics Overview
 

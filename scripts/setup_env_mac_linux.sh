@@ -123,7 +123,7 @@ set -e
 printf '\n'
 if [[ $VERIFY_EXIT_CODE -eq 0 ]]; then
   printf 'Setup completed successfully\n'
-  printf 'Next step: ./scripts/run_pipeline_mac_linux.sh\n'
+  printf 'Next step: ./scripts/run_ingest_mac_linux.sh or ./scripts/run_component_official_mac_linux.sh\n'
   printf 'Exploration notebooks listed in .gitattributes will be auto-cleared on commit\n'
 else
   printf 'Setup completed with verification failures\n'

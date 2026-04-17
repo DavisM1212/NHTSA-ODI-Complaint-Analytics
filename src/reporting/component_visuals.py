@@ -1,6 +1,5 @@
 import argparse
 import json
-import re
 from pathlib import Path
 
 import matplotlib
@@ -11,19 +10,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from src.config.contracts import (
+    COMPONENT_MULTI_OFFICIAL_LABELS,
+    COMPONENT_MULTI_OFFICIAL_MANIFEST,
+    COMPONENT_OFFICIAL_SUMMARY_CSV,
+    COMPONENT_SINGLE_OFFICIAL_CALIBRATION,
+    COMPONENT_SINGLE_OFFICIAL_CLASS,
+    COMPONENT_SINGLE_OFFICIAL_CONFUSION,
+    COMPONENT_SINGLE_OFFICIAL_MANIFEST,
+    COMPONENT_TARGET_SCOPE_NAME,
+)
 from src.config.paths import OUTPUTS_DIR, PROJECT_ROOT
 
 # -----------------------------------------------------------------------------
 # Paths and artifact names
 # -----------------------------------------------------------------------------
 DEFAULT_FIGURE_DIR = PROJECT_ROOT / 'docs' / 'figures' / 'component_models'
-OFFICIAL_SUMMARY_CSV = 'component_official_benchmark_summary.csv'
-SINGLE_TEXT_MANIFEST = 'component_textwave2b_calibration_manifest.json'
-SINGLE_CLASS_METRICS = 'component_single_label_textwave2b_class_metrics.csv'
-SINGLE_CONFUSION = 'component_single_label_textwave2b_confusion_major.csv'
-SINGLE_CALIBRATION = 'component_single_label_textwave2b_calibration.csv'
-MULTI_LABEL_METRICS = 'component_multilabel_label_metrics.csv'
-TARGET_SCOPE_SUMMARY = 'component_target_scope_summary.csv'
+OFFICIAL_SUMMARY_CSV = COMPONENT_OFFICIAL_SUMMARY_CSV
+SINGLE_TEXT_MANIFEST = COMPONENT_SINGLE_OFFICIAL_MANIFEST
+SINGLE_CLASS_METRICS = COMPONENT_SINGLE_OFFICIAL_CLASS
+SINGLE_CONFUSION = COMPONENT_SINGLE_OFFICIAL_CONFUSION
+SINGLE_CALIBRATION = COMPONENT_SINGLE_OFFICIAL_CALIBRATION
+MULTI_LABEL_METRICS = COMPONENT_MULTI_OFFICIAL_LABELS
+TARGET_SCOPE_SUMMARY = COMPONENT_TARGET_SCOPE_NAME
 
 FIGURE_INDEX = 'component_model_figure_index.csv'
 
@@ -184,8 +193,8 @@ def plot_official_summary(summary_df, output_dir):
 
 
 def plot_single_lift(manifest, output_dir):
-    baseline = manifest['locked_holdout_baseline']
-    promoted = manifest['calibrated_holdout_metrics']
+    baseline = manifest['uncalibrated_holdout_metrics']
+    promoted = manifest['official_holdout_metrics']
     metrics = ['macro_f1', 'top_1_accuracy', 'top_3_accuracy']
     labels = ['Macro F1', 'Top-1 Accuracy', 'Top-3 Accuracy']
 
@@ -199,14 +208,14 @@ def plot_single_lift(manifest, output_dir):
         positions - width / 2,
         baseline_values,
         width,
-        label='Structured CatBoost baseline',
+        label='Uncalibrated late fusion',
         color=FIGURE_STYLE['baseline']
     )
     ax.bar(
         positions + width / 2,
         promoted_values,
         width,
-        label='Calibrated text + structured fusion',
+        label='Calibrated official model',
         color=FIGURE_STYLE['promoted']
     )
 
@@ -227,7 +236,7 @@ def plot_single_lift(manifest, output_dir):
     ax.legend(frameon=False, loc='upper left')
     setup_axes(
         ax,
-        'Single-Label Model Lift From Complaint Narrative Text',
+        'Single-Label Calibration Lift On Holdout',
         xlabel=None,
         ylabel='Holdout metric'
     )
@@ -235,8 +244,8 @@ def plot_single_lift(manifest, output_dir):
         fig,
         output_dir,
         'component_single_label_model_lift',
-        'Single-Label Model Lift From Complaint Narrative Text',
-        'Holdout metric lift from structured CatBoost to calibrated text plus structured late fusion'
+        'Single-Label Calibration Lift On Holdout',
+        'Holdout metric lift from uncalibrated late fusion to the calibrated official single-label model'
     )
 
 
@@ -263,7 +272,7 @@ def plot_single_class_f1(class_df, output_dir):
         output_dir,
         'component_single_label_class_f1',
         'Single-Label Holdout F1 By Component Group',
-        'Per-class F1 for the promoted calibrated single-label component model'
+        'Per-class F1 for the official calibrated single-label component model'
     )
 
 
@@ -338,7 +347,7 @@ def plot_single_calibration(calibration_df, output_dir):
         output_dir,
         'component_single_label_calibration',
         'Single-Label Calibration After Power Scaling',
-        'Reliability plot for the calibrated single-label text plus structured fusion model'
+        'Reliability plot for the official calibrated single-label late-fusion model'
     )
 
 

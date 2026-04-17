@@ -13,9 +13,15 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
 
 from src.config import settings
+from src.config.contracts import (
+    COMPONENT_MULTI_OFFICIAL_LABELS,
+    COMPONENT_MULTI_OFFICIAL_MANIFEST,
+    COMPONENT_MULTI_OFFICIAL_METRICS,
+    COMPONENT_MULTI_OFFICIAL_SPLIT,
+)
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     MAX_TOP_K,
     MULTI_INPUT_STEM,
     MULTI_TARGET_COL,
@@ -30,7 +36,7 @@ from src.modeling.component_common import (
     select_multilabel_threshold,
     split_multi_label_cases,
 )
-from src.modeling.component_multilabel_shared import (
+from src.modeling.common.multilabel import (
     CATBOOST_NAME,
     DEF_CATBOOST_EVAL_PERIOD,
     DEF_CATBOOST_ITERS,
@@ -45,15 +51,15 @@ from src.modeling.component_multilabel_shared import (
 )
 
 # Workflow owner for locked multi-label benchmarks
-# Writes the baseline manifest consumed by downstream Wave comparisons
+# Writes the official multi-label manifest consumed by reporting
 
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
-SPLIT_NAME = 'component_multilabel_split_summary.csv'
-METRIC_NAME = 'component_multilabel_metrics.csv'
-LABEL_NAME = 'component_multilabel_label_metrics.csv'
-MANIFEST_NAME = 'component_multilabel_manifest.json'
+SPLIT_NAME = COMPONENT_MULTI_OFFICIAL_SPLIT
+METRIC_NAME = COMPONENT_MULTI_OFFICIAL_METRICS
+LABEL_NAME = COMPONENT_MULTI_OFFICIAL_LABELS
+MANIFEST_NAME = COMPONENT_MULTI_OFFICIAL_MANIFEST
 
 
 # -----------------------------------------------------------------------------
@@ -310,9 +316,9 @@ def parse_args():
         help='CatBoost logging interval'
     )
     parser.add_argument(
-        '--skip-readme-update',
-        action='store_true',
-        help='Skip updating the README benchmark section from the final artifact'
+        '--publish-status',
+        default='official',
+        help='Release status recorded in the official manifest'
     )
     return parser.parse_args()
 
@@ -590,8 +596,12 @@ def main():
     )
 
     metric_df = pd.DataFrame(metric_rows)
-    selected_model_row = select_official_model(metric_df)
-    selected_model_name = str(selected_model_row['model'])
+    selected_model_name = CATBOOST_NAME
+    selected_model_row = metric_df.loc[
+        metric_df['model'].eq(selected_model_name)
+        & metric_df['stage'].eq('selection_train_valid')
+        & metric_df['split'].eq('valid_2025')
+    ].iloc[0]
     official_holdout_row = metric_df.loc[
         metric_df['model'].eq(selected_model_name)
         & metric_df['stage'].eq('final_holdout')
@@ -625,10 +635,12 @@ def main():
     label_df.to_csv(label_path, index=False)
 
     manifest = {
-        'artifact_role': 'final_benchmark',
+        'artifact_role': 'component_multilabel_official',
         'target_scope': 'multi_label_component_routing',
+        'task': 'multi_label_component_routing',
         'input_stem': MULTI_INPUT_STEM,
         'input_path': str(input_path),
+        'official_model': selected_model_name,
         'selected_model': selected_model_name,
         'selected_feature_set': feature_info['feature_set_name'],
         'feature_manifest': feature_info,
@@ -645,6 +657,8 @@ def main():
         'official_metric': 'macro_f1 then micro_f1 on valid_2025, reported on holdout_2026',
         'official_holdout_metrics': official_holdout_row.to_dict(),
         'candidate_models': [NAIVE_NAME, LOGIT_NAME, CATBOOST_NAME],
+        'promotion_status': args.publish_status,
+        'reporting_ready': True,
         'catboost_runtime': {
             'requested_task_type': str(args.task_type).upper(),
             'selection_task_type': catboost_selection['actual_task_type'],
@@ -668,17 +682,14 @@ def main():
             'valid_2025': int(len(valid_df)),
             'holdout_2026': int(len(holdout_df)),
             'dev_2020_2025': int(len(dev_df))
+        },
+        'artifacts': {
+            'split_summary': str(split_path),
+            'metrics': str(metric_path),
+            'label_metrics': str(label_path)
         }
     }
     write_json(manifest, manifest_path)
-
-    if not args.skip_readme_update:
-        try:
-            from src.reporting.update_component_readme import update_component_readme
-
-            update_component_readme(multi_manifest_path=manifest_path)
-        except Exception as exc:
-            print(f'[warn] README benchmark update skipped: {exc}')
 
     print(f'[write] {split_path}')
     print(f'[write] {metric_path}')

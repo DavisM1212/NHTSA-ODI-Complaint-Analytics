@@ -4,7 +4,7 @@ from scipy import sparse
 from sklearn.linear_model import SGDClassifier
 from sklearn.multiclass import OneVsRestClassifier
 
-from src.modeling.component_text_wave2 import (
+from src.modeling.experiments.component_text_wave2 import (
     FINAL_LINEAR_MODEL_CHOICES,
     FINAL_LINEAR_MODEL_DEFAULT,
     FUSION_TEXT_WEIGHTS,

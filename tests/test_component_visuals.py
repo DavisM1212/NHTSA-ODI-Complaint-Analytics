@@ -1,6 +1,5 @@
 import json
 import shutil
-from pathlib import Path
 
 import pandas as pd
 
@@ -25,7 +24,7 @@ def test_generate_component_visuals_writes_expected_files():
                 {
                     'task': 'single_label_component',
                     'official_model': 'text_structured_late_fusion',
-                    'artifact_role': 'text_wave2b_calibration',
+                    'artifact_role': 'component_single_label_official',
                     'feature_set': 'wave1_incident_cohort_history',
                     'holdout_rows': 100,
                     'macro_f1': 0.75,
@@ -36,7 +35,7 @@ def test_generate_component_visuals_writes_expected_files():
                 {
                     'task': 'multi_label_component_routing',
                     'official_model': 'CatBoost MultiLabel',
-                    'artifact_role': 'final_benchmark',
+                    'artifact_role': 'component_multilabel_official',
                     'feature_set': 'core_structured',
                     'holdout_rows': 120,
                     'macro_f1': 0.23,
@@ -46,15 +45,15 @@ def test_generate_component_visuals_writes_expected_files():
                 }
             ]
         )
-        with (outputs_dir / 'component_textwave2b_calibration_manifest.json').open('w', encoding='utf-8') as handle:
+        with (outputs_dir / 'component_single_label_official_manifest.json').open('w', encoding='utf-8') as handle:
             json.dump(
                 {
-                    'locked_holdout_baseline': {
-                        'macro_f1': 0.33,
-                        'top_1_accuracy': 0.47,
-                        'top_3_accuracy': 0.70
+                    'uncalibrated_holdout_metrics': {
+                        'macro_f1': 0.70,
+                        'top_1_accuracy': 0.80,
+                        'top_3_accuracy': 0.92
                     },
-                    'calibrated_holdout_metrics': {
+                    'official_holdout_metrics': {
                         'macro_f1': 0.75,
                         'top_1_accuracy': 0.85,
                         'top_3_accuracy': 0.95
@@ -63,14 +62,14 @@ def test_generate_component_visuals_writes_expected_files():
                 handle
             )
         write_csv(
-            outputs_dir / 'component_single_label_textwave2b_class_metrics.csv',
+            outputs_dir / 'component_single_label_official_class_metrics.csv',
             [
                 {'component_group': 'ENGINE', 'support': 20, 'precision': 0.9, 'recall': 0.8, 'f1': 0.85},
                 {'component_group': 'BRAKES', 'support': 10, 'precision': 0.7, 'recall': 0.6, 'f1': 0.65}
             ]
         )
         write_csv(
-            outputs_dir / 'component_single_label_textwave2b_confusion_major.csv',
+            outputs_dir / 'component_single_label_official_confusion_major.csv',
             [
                 {'true_group': 'ENGINE', 'pred_group': 'ENGINE', 'count': 18, 'row_share': 0.90},
                 {'true_group': 'ENGINE', 'pred_group': 'BRAKES', 'count': 2, 'row_share': 0.10},
@@ -79,7 +78,7 @@ def test_generate_component_visuals_writes_expected_files():
             ]
         )
         write_csv(
-            outputs_dir / 'component_single_label_textwave2b_calibration.csv',
+            outputs_dir / 'component_single_label_official_calibration.csv',
             [
                 {
                     'calibration_method': 'power',
@@ -110,7 +109,7 @@ def test_generate_component_visuals_writes_expected_files():
             ]
         )
         write_csv(
-            outputs_dir / 'component_multilabel_label_metrics.csv',
+            outputs_dir / 'component_multilabel_official_label_metrics.csv',
             [
                 {'model': 'CatBoost MultiLabel', 'component_group': 'ENGINE', 'support': 20, 'precision': 0.4, 'recall': 0.8, 'f1': 0.53},
                 {'model': 'CatBoost MultiLabel', 'component_group': 'BRAKES', 'support': 10, 'precision': 0.3, 'recall': 0.5, 'f1': 0.38}

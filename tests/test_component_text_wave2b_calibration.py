@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.modeling.component_text_wave2b_calibration import (
+from src.modeling.official.component_single_text_calibrated import (
     apply_power_calibration,
     parse_float_list,
     select_calibration_alpha,

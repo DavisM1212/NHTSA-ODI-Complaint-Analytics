@@ -6,7 +6,7 @@ import pandas as pd
 
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import json_ready, load_frame, write_json
-from src.modeling.component_common import (
+from src.modeling.common.core import (
     BENCHMARK_FEATURE_SET_NAMES,
     DEFAULT_SELECTION_SEEDS,
     SINGLE_INPUT_STEM,
@@ -17,7 +17,7 @@ from src.modeling.component_common import (
     prep_single_label_cases,
     split_single_label_cases,
 )
-from src.modeling.component_tuning_shared import (
+from src.modeling.experiments.tuning_shared import (
     evaluate_params_across_seeds,
     summarize_seed_metrics,
 )

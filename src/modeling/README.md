@@ -1,66 +1,59 @@
 # Modeling Workflow
 
-Start here if you want the modeling pipeline order without tracing imports
+Start here if you want the current modeling layout without tracing imports.
 
-## Entrypoints
+## Package Layout
 
-These files own the runnable workflow and output artifacts
+- `official/`
+  - Durable modeling entrypoints that define the canonical component-model outputs
+- `experiments/`
+  - Structured sweeps, tuning runs, and exploratory model families that are useful but not part of the official reporting contract
+- `common/`
+  - Narrow shared helpers reused by multiple active entrypoints
 
-1. `tune_component_catboost.py`
-   - Purpose: choose the locked single-label CatBoost feature set and hyperparameters
-   - Reads: single-label processed input
-   - Writes: `component_single_label_selection_manifest.json` and tuning/search tables
+## Official Entrypoints
 
-2. `component_catboost.py`
-   - Purpose: run the locked single-label benchmark suite
-   - Reads: single-label processed input and the selection manifest from step 1
-   - Writes: single-label benchmark metrics, calibration, confusion, class metrics, feature importance, benchmark manifest
+1. `official/component_single_text_calibrated.py`
+   - Purpose: fit the locked official single-label component model
+   - Reads: `odi_component_single_label_cases` and `odi_component_text_sidecar`
+   - Writes: `component_single_label_official_manifest.json` plus official holdout, class, confusion, and calibration artifacts
 
-3. `component_multilabel.py`
-   - Purpose: run the locked multi-label benchmark suite
-   - Reads: multi-label processed input
-   - Writes: multi-label metrics, label metrics, split summary, manifest
+2. `official/component_multi_routing.py`
+   - Purpose: fit the locked official multi-label routing model
+   - Reads: `odi_component_multilabel_cases`
+   - Writes: `component_multilabel_official_manifest.json` plus official split, metrics, and label-metrics artifacts
 
-4. `component_feature_wave1.py`
-   - Purpose: compare structured feature families against the locked single-label and multi-label baselines
-   - Reads: the locked single-label benchmark manifest, selection manifest, calibration file, and multi-label manifest
-   - Writes: Wave 1 screen/select/holdout outputs plus a Wave 1 manifest
-   - Note: this is a structured feature sweep branch, not a prerequisite for text Wave 2
+3. `../reporting/update_component_readme.py`
+   - Purpose: validate the official manifests and publish the README summary block
+   - Reads: the two official manifests only
+   - Writes: generated README benchmark block plus official benchmark summary artifacts
 
-5. `component_text_wave2.py`
-   - Purpose: compare text, text-plus-structured, and late-fusion families against the locked baselines
-   - Reads: single-label benchmark outputs, multi-label benchmark outputs, processed text sidecar, and processed single/multi inputs
-   - Writes: Wave 2 screen/select/holdout outputs plus a Wave 2 manifest
+## Experiment Entrypoints
 
-6. `component_text_wave2b_calibration.py`
-   - Purpose: calibrate the selected Wave 2 single-label model
-   - Reads: Wave 2 manifest and the same processed single-label/text inputs used by Wave 2
-   - Writes: calibrated holdout outputs, calibration search grid, and calibration manifest
+1. `experiments/component_single_structured_tuning.py`
+   - Focused Optuna search for the structured single-label benchmark branch
 
-## Shared Helper Files
+2. `experiments/component_single_structured_baseline.py`
+   - Structured-only single-label benchmark and baselines
 
-These are not entrypoints and should usually be read only if you need implementation detail
+3. `experiments/component_feature_wave1.py`
+   - Structured feature-family sweeps beyond the locked official contract
 
-- `component_common.py`
-  - Broad shared modeling utilities, feature manifests, splits, and scoring helpers
-- `component_multilabel_shared.py`
-  - Narrow shared multilabel CatBoost helpers reused by the multilabel benchmark, Wave 1, and the Wave 2 helper layer
-- `component_tuning_shared.py`
-  - Narrow shared cross-seed tuning helpers reused by the CatBoost tuner and Wave 1
-- `component_text_shared.py`
-  - Reusable Wave 2 text and fusion helper layer used by the Wave 2 entrypoint and calibration step
+4. `experiments/component_text_wave2.py`
+   - Text and fusion family comparisons used during exploration
+
+## Shared Helpers
+
+- `common/core.py`
+  - Split policy, feature manifests, scoring helpers, and model-stage feature derivation for lean case tables
+- `common/multilabel.py`
+  - Shared CatBoost multi-label helpers
+- `common/text_fusion.py`
+  - Shared text/fusion helpers used by the experiment and official single-label flows
 
 ## Reading Order
 
-If you want to understand the pipeline quickly, read files in this order
-
-1. `src/modeling/README.md`
-2. The entrypoint you plan to run
-3. The locked input or manifest constants near the top of that entrypoint
-4. Only then open the matching `*_shared.py` helper if a specific implementation detail matters
-
-## Practical Rule
-
-To understand workflow order, stay in entrypoints
-
-To understand reusable implementation details, open the matching shared helper
+1. Read the official entrypoint you plan to run
+2. Check its input/output artifact names near the top of the file
+3. Open the matching `common/` helper only if you need implementation detail
+4. Use `experiments/` only when you intentionally want exploratory or cloud-heavy work
