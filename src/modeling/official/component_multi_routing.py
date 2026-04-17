@@ -18,40 +18,30 @@ from src.config.contracts import (
     COMPONENT_MULTI_OFFICIAL_MANIFEST,
     COMPONENT_MULTI_OFFICIAL_METRICS,
     COMPONENT_MULTI_OFFICIAL_SPLIT,
+    TRAIN_END,
+    VALID_END,
 )
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
-from src.modeling.common.core import (
-    MAX_TOP_K,
-    MULTI_INPUT_STEM,
-    MULTI_TARGET_COL,
-    TRAIN_END,
-    VALID_END,
-    apply_multilabel_threshold,
-    feature_manifest,
-    parse_pipe_labels,
-    prep_catboost_frames,
-    prep_multi_label_cases,
-    score_multilabel_predictions,
-    select_multilabel_threshold,
-    split_multi_label_cases,
-)
-from src.modeling.common.multilabel import (
+from src.modeling.common.helpers import (
     CATBOOST_NAME,
     DEF_CATBOOST_EVAL_PERIOD,
     DEF_CATBOOST_ITERS,
     DEF_MIN_POSITIVE_LABELS,
     DEF_THRESHOLDS,
-    build_catboost_model,
+    MAX_TOP_K,
+    MULTI_INPUT_STEM,
+    MULTI_TARGET_COL,
+    apply_multilabel_threshold,
     build_metric_row,
-    fit_catboost_holdout_with_fallback,
-    fit_catboost_selection_with_fallback,
-    is_retryable_catboost_gpu_error,
-    select_best_multilabel_threshold,
+    feature_manifest,
+    fit_catboost_holdout_stage,
+    fit_catboost_selection_stage,
+    parse_pipe_labels,
+    prep_multi_label_cases,
+    select_multilabel_threshold,
+    split_multi_label_cases,
 )
-
-# Workflow owner for locked multi-label benchmarks
-# Writes the official multi-label manifest consumed by reporting
 
 # -----------------------------------------------------------------------------
 # Output names
@@ -170,7 +160,7 @@ def fit_logistic_selection_stage(train_df, valid_df, y_train, y_valid, feature_i
 
     train_proba = model.predict_proba(X_train)
     valid_proba = model.predict_proba(X_valid)
-    threshold_choice = select_best_multilabel_threshold(
+    threshold_choice = select_multilabel_threshold(
         y_valid,
         valid_proba,
         thresholds=thresholds,
@@ -467,7 +457,7 @@ def main():
 
     log_line('')
     log_line('[phase 3/4] CatBoost multi-label candidate')
-    catboost_selection = fit_catboost_selection_with_fallback(
+    catboost_selection = fit_catboost_selection_stage(
         train_df,
         valid_df,
         y_train,
@@ -556,7 +546,7 @@ def main():
         f'micro_f1={metric_rows[-1]["micro_f1"]:.4f}'
     )
 
-    catboost_holdout = fit_catboost_holdout_with_fallback(
+    catboost_holdout = fit_catboost_holdout_stage(
         dev_df,
         holdout_df,
         y_dev,

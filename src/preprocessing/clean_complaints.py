@@ -12,10 +12,10 @@ from src.config.contracts import (
     CLEANING_SUMMARY_NAME,
     COMBINED_COMPLAINTS_STEM,
     COMPONENT_ROWS_STEM,
+    REFERENCE_MODEL_YEAR_MAX,
     SEVERITY_CASES_STEM,
 )
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
-from src.config.split_policy import REFERENCE_MODEL_YEAR_MAX
 from src.data.io_utils import write_dataframe
 
 # -----------------------------------------------------------------------------
@@ -942,19 +942,19 @@ def main():
     audit_df = build_cleaning_audit(work_df)
     severity_df = build_severity_cases(cleaned_df, audit_df)
     component_df = build_component_rows(cleaned_df, audit_df)
-    summary_df = build_summary(cleaned_df, audit_df, severity_df, component_df)
-    drift_df = build_source_era_drift(audit_df)
+    # summary_df = build_summary(cleaned_df, audit_df, severity_df, component_df)
+    # drift_df = build_source_era_drift(audit_df)
 
     clean_path = write_dataframe(
         cleaned_df,
         PROCESSED_DATA_DIR / CLEAN_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    audit_path = write_dataframe(
-        audit_df,
-        PROCESSED_DATA_DIR / AUDIT_STEM,
-        prefer_parquet=args.output_format == 'parquet'
-    )
+    # audit_path = write_dataframe(
+    #     audit_df,
+    #     PROCESSED_DATA_DIR / AUDIT_STEM,
+    #     prefer_parquet=args.output_format == 'parquet'
+    # )
     severity_path = write_dataframe(
         severity_df,
         PROCESSED_DATA_DIR / SEVERITY_STEM,
@@ -965,17 +965,17 @@ def main():
         PROCESSED_DATA_DIR / COMPONENT_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    summary_path = OUTPUTS_DIR / SUMMARY_NAME
-    drift_path = OUTPUTS_DIR / DRIFT_NAME
-    summary_df.to_csv(summary_path, index=False)
-    drift_df.to_csv(drift_path, index=False)
+    # summary_path = OUTPUTS_DIR / SUMMARY_NAME
+    # drift_path = OUTPUTS_DIR / DRIFT_NAME
+    # summary_df.to_csv(summary_path, index=False)
+    # drift_df.to_csv(drift_path, index=False)
 
     print(f'[write] {clean_path}')
-    print(f'[write] {audit_path}')
+    # print(f'[write] {audit_path}')
     print(f'[write] {severity_path}')
     print(f'[write] {component_path}')
-    print(f'[write] {summary_path}')
-    print(f'[write] {drift_path}')
+    # print(f'[write] {summary_path}')
+    # print(f'[write] {drift_path}')
     print('')
     print('[done] Complaint preprocessing finished')
     return 0

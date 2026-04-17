@@ -13,7 +13,8 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import json_ready, load_frame, write_json
-from src.modeling.common.core import (
+from src.modeling.common.helpers import (
+    CATBOOST_NAME,
     DEFAULT_SELECTION_SEEDS,
     FEATURE_WAVE1_SPLIT_MODE,
     MULTI_INPUT_STEM,
@@ -28,6 +29,8 @@ from src.modeling.common.core import (
     build_multiclass_calibration_df,
     build_multiclass_metric_row,
     compose_feature_manifest,
+    fit_catboost_holdout_stage,
+    fit_catboost_selection_stage,
     fit_catboost_with_external_selection,
     get_split_policy,
     parse_pipe_labels,
@@ -39,17 +42,8 @@ from src.modeling.common.core import (
     split_single_label_cases_by_mode,
     subset_case_frame,
 )
-from src.modeling.common.multilabel import (
-    CATBOOST_NAME,
-    fit_catboost_holdout_with_fallback,
-    fit_catboost_selection_with_fallback,
-)
-from src.modeling.common.multilabel import (
+from src.modeling.common.helpers import (
     build_metric_row as build_multilabel_metric_row,
-)
-from src.modeling.experiments.tuning_shared import (
-    evaluate_params_across_seeds,
-    summarize_seed_metrics,
 )
 
 # Workflow owner for Wave 1 structured feature-family comparisons
@@ -220,6 +214,58 @@ def keep_if_better_or_equal(candidate_row, current_row, metric_cols):
     candidate = tuple(float(candidate_row[column]) for column in metric_cols)
     current = tuple(float(current_row[column]) for column in metric_cols)
     return candidate >= current
+
+
+def evaluate_params_across_seeds(train_df, valid_df, feature_info, params, task_type, devices, seed_list, verbose, selection_eval_period=1, progress_label=None):
+    run_rows = []
+    total_seeds = len(seed_list)
+    for seed_idx, seed in enumerate(seed_list, start=1):
+        result = fit_catboost_with_external_selection(
+            train_df,
+            valid_df,
+            feature_info,
+            params,
+            task_type=task_type,
+            devices=devices,
+            random_seed=seed,
+            verbose=verbose,
+            selection_eval_period=selection_eval_period,
+            include_train_outputs=False,
+            include_valid_outputs=False
+        )
+        row = {
+            'seed': seed,
+            'fit_seconds': result['fit_seconds'],
+            'selected_iteration': result['selected_iteration'],
+            'top_1_accuracy': result['valid_metrics']['top_1_accuracy'],
+            'macro_f1': result['valid_metrics']['macro_f1'],
+            'top_3_accuracy': result['valid_metrics']['top_3_accuracy']
+        }
+        run_rows.append(row)
+
+        if progress_label:
+            log_line(
+                f'[{progress_label}] seed {seed_idx}/{total_seeds} ({seed}) '
+                f'fit={row["fit_seconds"]:.2f}s iter={row["selected_iteration"]} '
+                f'macro_f1={row["macro_f1"]:.4f} top1={row["top_1_accuracy"]:.4f} '
+                f'top3={row["top_3_accuracy"]:.4f}'
+            )
+    return pd.DataFrame(run_rows)
+
+
+def summarize_seed_metrics(run_df):
+    return {
+        'fit_seconds_mean': round(float(run_df['fit_seconds'].mean()), 2),
+        'fit_seconds_std': round(float(run_df['fit_seconds'].std(ddof=0)), 2),
+        'selected_iteration_mean': round(float(run_df['selected_iteration'].mean()), 2),
+        'selected_iteration_median': int(run_df['selected_iteration'].median()),
+        'top_1_accuracy_mean': round(float(run_df['top_1_accuracy'].mean()), 4),
+        'top_1_accuracy_std': round(float(run_df['top_1_accuracy'].std(ddof=0)), 4),
+        'macro_f1_mean': round(float(run_df['macro_f1'].mean()), 4),
+        'macro_f1_std': round(float(run_df['macro_f1'].std(ddof=0)), 4),
+        'top_3_accuracy_mean': round(float(run_df['top_3_accuracy'].mean()), 4),
+        'top_3_accuracy_std': round(float(run_df['top_3_accuracy'].std(ddof=0)), 4)
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -394,10 +440,6 @@ def retune_single_family(train_df, valid_df, feature_info, locked_params, task_t
 
 
 def run_single_wave(args, feature_families, locked_single_manifest, locked_single_selection):
-    screen_rows = []
-    select_rows = []
-    holdout_rows = []
-
     raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.single_input_path)
     case_df = prep_single_label_cases(raw_df, all_feature_columns())
     split_parts = split_single_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)
@@ -442,7 +484,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
         input_path=input_path,
         stage_name='screen_2024'
     )
-    screen_rows.append(core_screen_row)
     log_line(
         f'[single] screen_2024 core_structured done '
         f'macro_f1={float(core_screen_row["macro_f1"]):.4f} '
@@ -472,7 +513,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             stage_name='screen_2024'
         )
         bundle_rows.append(row)
-        screen_rows.append(row)
         log_line(
             f'[single] screen_2024 {family_name} done '
             f'macro_f1={float(row["macro_f1"]):.4f} '
@@ -499,7 +539,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
         input_path=input_path,
         stage_name='select_2025'
     )
-    select_rows.append(core_select_row)
     log_single_result('select_2025', 'core_structured', core_select_row, core_select_result)
 
     candidate_rows = []
@@ -518,7 +557,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             input_path=input_path,
             stage_name='select_2025'
         )
-        select_rows.append(row)
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
         log_single_result('select_2025', family_name, row, result)
@@ -537,7 +575,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             input_path=input_path,
             stage_name='select_2025'
         )
-        select_rows.append(row)
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
         log_single_result('select_2025', family_name, row, result)
@@ -566,7 +603,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             input_path=input_path,
             stage_name='select_prune'
         )
-        select_rows.append(row)
         log_single_result('select_prune', pruned_info['feature_set_name'], row, result)
         if keep_if_better_or_equal(row, current_best_row, ['macro_f1', 'top_1_accuracy', 'top_3_accuracy']):
             current_best_row = row
@@ -582,8 +618,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
         and select_top3_drop <= SINGLE_TOP3_DROP_LIMIT
     )
 
-    single_trials_df = pd.DataFrame()
-    single_calibration_df = pd.DataFrame()
     holdout_result = None
     promotion_status = 'rejected_select'
     tuned_manifest = None
@@ -601,18 +635,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             selection_eval_period=retune_eval_period,
             random_seed=args.random_seed
         )
-        single_trials_df = pd.DataFrame(
-            [
-                {
-                    'trial': trial.number,
-                    'macro_f1_mean': round(float(trial.value), 4),
-                    **trial.params,
-                    **trial.user_attrs
-                }
-                for trial in retune['study'].trials
-                if trial.state == optuna.trial.TrialState.COMPLETE
-            ]
-        ).sort_values(['macro_f1_mean'], ascending=False).reset_index(drop=True)
         selected_iteration = int(retune['selection_metrics']['selected_iteration_median'])
         tuned_manifest = {
             'artifact_role': 'model_selection',
@@ -639,7 +661,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             devices=args.devices,
             random_seed=args.random_seed
         )
-        single_calibration_df = holdout_result['calibration_df']
         holdout_row = {
             **feature_row_base(
                 'single_label',
@@ -650,7 +671,6 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
             ),
             **holdout_result['row']
         }
-        holdout_rows.append(holdout_row)
         locked_ece = read_locked_single_ece()
         holdout_macro_gain = float(
             holdout_row['macro_f1'] - locked_single_manifest['official_holdout_metrics']['macro_f1']
@@ -666,12 +686,7 @@ def run_single_wave(args, feature_families, locked_single_manifest, locked_singl
     return {
         'input_path': str(input_path),
         'split_df': split_parts['split_df'],
-        'screen_df': pd.DataFrame(screen_rows),
-        'select_df': pd.DataFrame(select_rows),
-        'holdout_df': pd.DataFrame(holdout_rows),
-        'trials_df': single_trials_df,
         'selection_manifest': tuned_manifest,
-        'calibration_df': single_calibration_df,
         'selected_feature': current_best_row['feature_set_name'],
         'select_metrics': current_best_row,
         'select_baseline': core_select_row,
@@ -707,7 +722,7 @@ def score_multi_family(train_df, eval_df, feature_info, task_type, devices, rand
     eval_labels = build_multilabel_targets(eval_df)
     check_unseen_multilabel_labels(train_labels, eval_labels, stage_name)
     _, y_train, y_eval = build_multilabel_encoded(train_labels, eval_labels)
-    result = fit_catboost_selection_with_fallback(
+    result = fit_catboost_selection_stage(
         train_df,
         eval_df,
         y_train,
@@ -751,7 +766,7 @@ def fit_multi_holdout(dev_df, holdout_df, feature_info, selection_result, random
     holdout_labels = build_multilabel_targets(holdout_df)
     check_unseen_multilabel_labels(dev_labels, holdout_labels, 'Holdout split')
     mlb, y_dev, y_holdout = build_multilabel_encoded(dev_labels, holdout_labels)
-    holdout = fit_catboost_holdout_with_fallback(
+    holdout = fit_catboost_holdout_stage(
         dev_df,
         holdout_df,
         y_dev,
@@ -797,10 +812,6 @@ def fit_multi_holdout(dev_df, holdout_df, feature_info, selection_result, random
 
 
 def run_multi_wave(args, feature_families, locked_multi_manifest):
-    screen_rows = []
-    select_rows = []
-    holdout_rows = []
-
     raw_df, input_path = load_frame(MULTI_INPUT_STEM, input_path=args.multi_input_path)
     case_df = prep_multi_label_cases(raw_df, all_feature_columns())
     split_parts = split_multi_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)
@@ -830,7 +841,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         input_path=input_path,
         stage_name='screen_2024'
     )
-    screen_rows.append(core_screen_row)
     log_line(
         f'[multi] screen_2024 core_structured done '
         f'macro_f1={float(core_screen_row["macro_f1"]):.4f} '
@@ -858,7 +868,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
             stage_name='screen_2024'
         )
         bundle_rows.append(row)
-        screen_rows.append(row)
         log_line(
             f'[multi] screen_2024 {family_name} done '
             f'macro_f1={float(row["macro_f1"]):.4f} '
@@ -883,7 +892,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
         input_path=input_path,
         stage_name='select_2025'
     )
-    select_rows.append(core_select_row)
     log_multi_result('select_2025', 'core_structured', core_select_row, core_select_result)
 
     candidate_rows = []
@@ -901,7 +909,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
             input_path=input_path,
             stage_name='select_2025'
         )
-        select_rows.append(row)
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
         candidate_selection_lookup[family_name] = result
@@ -919,7 +926,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
             input_path=input_path,
             stage_name='select_2025'
         )
-        select_rows.append(row)
         candidate_rows.append(row)
         candidate_info_lookup[family_name] = feature_families[family_name]
         candidate_selection_lookup[family_name] = result
@@ -948,7 +954,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
             input_path=input_path,
             stage_name='select_prune'
         )
-        select_rows.append(row)
         log_multi_result('select_prune', pruned_info['feature_set_name'], row, result)
         if keep_if_better_or_equal(row, current_best_row, ['macro_f1', 'micro_f1', 'recall_at_3', 'precision_at_3']):
             current_best_row = row
@@ -960,7 +965,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
     select_improvement = float(current_best_row['macro_f1'] - core_select_row['macro_f1'])
     select_gate_pass = select_improvement >= MULTI_PROMOTE_SELECT_DELTA
 
-    multi_label_df = pd.DataFrame()
     promotion_status = 'rejected_select'
     if select_gate_pass:
         holdout_result = fit_multi_holdout(
@@ -981,8 +985,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
             ),
             **holdout_result['row']
         }
-        holdout_rows.append(holdout_row)
-        multi_label_df = holdout_result['label_df']
 
         locked_holdout = locked_multi_manifest['official_holdout_metrics']
         macro_gain = float(holdout_row['macro_f1'] - locked_holdout['macro_f1'])
@@ -996,10 +998,6 @@ def run_multi_wave(args, feature_families, locked_multi_manifest):
     return {
         'input_path': str(input_path),
         'split_df': split_parts['split_df'],
-        'screen_df': pd.DataFrame(screen_rows),
-        'select_df': pd.DataFrame(select_rows),
-        'holdout_df': pd.DataFrame(holdout_rows),
-        'label_df': multi_label_df,
         'selected_feature': current_best_row['feature_set_name'],
         'select_metrics': current_best_row,
         'select_baseline': core_select_row,
@@ -1099,15 +1097,8 @@ def main():
             locked_single_manifest,
             locked_single_selection
         )
-        single_result['screen_df'].to_csv(OUTPUTS_DIR / SINGLE_SCREEN_NAME, index=False)
-        single_result['select_df'].to_csv(OUTPUTS_DIR / SINGLE_SELECT_NAME, index=False)
-        single_result['holdout_df'].to_csv(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME, index=False)
-        if not single_result['trials_df'].empty:
-            single_result['trials_df'].to_csv(OUTPUTS_DIR / SINGLE_TRIALS_NAME, index=False)
         if single_result['selection_manifest'] is not None:
             write_json(single_result['selection_manifest'], OUTPUTS_DIR / SINGLE_SELECTION_NAME)
-        if not single_result['calibration_df'].empty:
-            single_result['calibration_df'].to_csv(OUTPUTS_DIR / SINGLE_CALIB_NAME, index=False)
 
         global_manifest['tasks']['single_label'] = {
             'input_path': single_result['input_path'],
@@ -1116,14 +1107,7 @@ def main():
             'select_baseline': single_result['select_baseline'],
             'promotion_status': single_result['promotion_status'],
             'select_gate_pass': single_result['select_gate_pass'],
-            'artifacts': {
-                'screen': str(OUTPUTS_DIR / SINGLE_SCREEN_NAME),
-                'select': str(OUTPUTS_DIR / SINGLE_SELECT_NAME),
-                'holdout': str(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME),
-                'trials': str(OUTPUTS_DIR / SINGLE_TRIALS_NAME),
-                'selection_manifest': str(OUTPUTS_DIR / SINGLE_SELECTION_NAME),
-                'holdout_calibration': str(OUTPUTS_DIR / SINGLE_CALIB_NAME)
-            }
+            'artifacts': {'selection_manifest': str(OUTPUTS_DIR / SINGLE_SELECTION_NAME)}
         }
 
     if not args.skip_multi:
@@ -1133,12 +1117,6 @@ def main():
             feature_families,
             locked_multi_manifest
         )
-        multi_result['screen_df'].to_csv(OUTPUTS_DIR / MULTI_SCREEN_NAME, index=False)
-        multi_result['select_df'].to_csv(OUTPUTS_DIR / MULTI_SELECT_NAME, index=False)
-        multi_result['holdout_df'].to_csv(OUTPUTS_DIR / MULTI_HOLDOUT_NAME, index=False)
-        if not multi_result['label_df'].empty:
-            multi_result['label_df'].to_csv(OUTPUTS_DIR / MULTI_LABEL_NAME, index=False)
-
         global_manifest['tasks']['multi_label'] = {
             'input_path': multi_result['input_path'],
             'selected_feature': multi_result['selected_feature'],
@@ -1146,12 +1124,7 @@ def main():
             'select_baseline': multi_result['select_baseline'],
             'promotion_status': multi_result['promotion_status'],
             'select_gate_pass': multi_result['select_gate_pass'],
-            'artifacts': {
-                'screen': str(OUTPUTS_DIR / MULTI_SCREEN_NAME),
-                'select': str(OUTPUTS_DIR / MULTI_SELECT_NAME),
-                'holdout': str(OUTPUTS_DIR / MULTI_HOLDOUT_NAME),
-                'label_metrics': str(OUTPUTS_DIR / MULTI_LABEL_NAME)
-            }
+            'artifacts': {}
         }
 
     write_json(global_manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)

@@ -187,21 +187,7 @@ def main():
             PROCESSED_DATA_DIR / settings.COMBINED_COMPLAINT_OUTPUT_STEM,
             prefer_parquet=args.output_format == "parquet"
         )
-        summary_path = OUTPUTS_DIR / "odi_complaints_combined_summary.csv"
-        summary_df = pd.DataFrame(
-            [
-                {
-                    "rows": int(len(combined_df)),
-                    "columns": int(len(combined_df.columns)),
-                    "processed_output": str(
-                        combined_output.relative_to(PROCESSED_DATA_DIR.parent)
-                    )
-                }
-            ]
-        )
-        summary_df.to_csv(summary_path, index=False)
         print(f"[write] {combined_output}")
-        print(f"[write] {summary_path}")
 
     print("")
     print("[done] ODI complaint ingestion finished")

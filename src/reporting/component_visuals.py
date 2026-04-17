@@ -2,9 +2,9 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use('Agg')
+mpl.use('Agg')
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +12,6 @@ import pandas as pd
 
 from src.config.contracts import (
     COMPONENT_MULTI_OFFICIAL_LABELS,
-    COMPONENT_MULTI_OFFICIAL_MANIFEST,
     COMPONENT_OFFICIAL_SUMMARY_CSV,
     COMPONENT_SINGLE_OFFICIAL_CALIBRATION,
     COMPONENT_SINGLE_OFFICIAL_CLASS,

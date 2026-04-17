@@ -23,5 +23,9 @@
         "data/outputs": true,
         ".venv": true
     },
-    "terminal.integrated.cwd": "${workspaceFolder}"
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "chat.tools.terminal.autoApprove": {
+        "Test-Path": true,
+        "ForEach-Object": true
+    }
 }

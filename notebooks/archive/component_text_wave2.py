@@ -1,67 +1,34 @@
 import argparse
-import json
 import sys
-from pathlib import Path
-from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from scipy import sparse
-from sklearn.compose import ColumnTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
-from sklearn.multiclass import OneVsRestClassifier
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import (
-    FunctionTransformer,
-    MultiLabelBinarizer,
-    OneHotEncoder,
-    StandardScaler,
-    normalize,
-)
 
+import src.modeling.common.text_fusion as txt_fus
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
 from src.features.component_text_sidecar import SIDECAR_STEM
-from src.modeling.common.core import (
-    DATE_COL,
+from src.modeling.common.helpers import (
     FEATURE_WAVE1_SPLIT_MODE,
-    ID_COL,
-    MAX_TOP_K,
     MULTI_INPUT_STEM,
-    MULTI_TARGET_COL,
     SINGLE_INPUT_STEM,
     TARGET_COL,
     apply_multilabel_threshold,
-    build_catboost_model,
     build_multiclass_calibration_df,
     build_multiclass_class_df,
     build_multiclass_confusion_df,
-    build_multiclass_metric_row,
     feature_manifest,
-    fit_catboost_with_external_selection,
-    parse_pipe_labels,
-    prep_catboost_frames,
     prep_multi_label_cases,
     prep_single_label_cases,
-    score_multiclass_from_proba,
-    select_multilabel_threshold,
     split_multi_label_cases_by_mode,
     split_single_label_cases_by_mode,
-    subset_case_frame,
 )
-
-# Workflow owner for Wave 2 text and fusion comparisons
-# Uses locked benchmark outputs plus the text sidecar, while component_text_shared.py holds the reusable helper layer
-# Keep the reusable Wave 2 helper layer centralized while this module owns orchestration
-from src.modeling.common.text_fusion import *
 
 
 def log_single_family(stage_name, family_name, row):
-    log_line(
+    txt_fus.log_line(
         f'[single] {stage_name} {family_name} '
         f'macro_f1={float(row["macro_f1"]):.4f} '
         f'top1={float(row["top_1_accuracy"]):.4f} '
@@ -70,7 +37,7 @@ def log_single_family(stage_name, family_name, row):
 
 
 def log_multi_family(stage_name, family_name, row):
-    log_line(
+    txt_fus.log_line(
         f'[multi] {stage_name} {family_name} '
         f'macro_f1={float(row["macro_f1"]):.4f} '
         f'micro_f1={float(row["micro_f1"]):.4f} '
@@ -86,15 +53,15 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     select_rows = []
     holdout_rows = []
     class_df = pd.DataFrame()
-    confusion_df = empty_single_confusion_df()
-    calibration_df = empty_single_calibration_df()
+    confusion_df = txt_fus.empty_single_confusion_df()
+    calibration_df = txt_fus.empty_single_calibration_df()
     overlap_metrics = []
     completed_stages = []
 
     raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.single_input_path)
     sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
     case_df = prep_single_label_cases(raw_df, structured_feature_info['feature_cols'])
-    case_df = merge_text_sidecar(case_df, sidecar_df)
+    case_df = txt_fus.merge_text_sidecar(case_df, sidecar_df)
     split_parts = split_single_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)
 
     train_core_df = split_parts['train_core']
@@ -105,7 +72,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     holdout_df = split_parts['holdout_2026']
     locked_params = locked_single_selection['best_params']
 
-    log_line(
+    txt_fus.log_line(
         f'[single] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
         f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,} '
         f'final_linear_model={args.final_linear_model}'
@@ -122,7 +89,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 'split_df': split_parts['split_df'],
                 'screen_df': pd.DataFrame(screen_rows),
                 'select_df': pd.DataFrame(select_rows),
-                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_single_holdout_df(),
+                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_single_holdout_df(),
                 'class_df': class_df,
                 'confusion_df': confusion_df,
                 'calibration_df': calibration_df,
@@ -138,7 +105,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             }
         )
 
-    structured_screen = fit_single_structured_family(
+    structured_screen = txt_fus.fit_single_structured_family(
         train_core_df,
         screen_df,
         structured_feature_info,
@@ -147,9 +114,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         devices=args.devices,
         random_seed=args.random_seed
     )
-    structured_screen_row = build_single_row(
+    structured_screen_row = txt_fus.build_single_row(
         'single_label',
-        STRUCTURED_FAMILY,
+        txt_fus.STRUCTURED_FAMILY,
         input_path,
         text_sidecar_path,
         'screen_2024',
@@ -161,18 +128,18 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         selected_iteration=structured_screen['selected_iteration']
     )
     screen_rows.append(structured_screen_row)
-    log_single_family('screen_2024', STRUCTURED_FAMILY, structured_screen_row)
+    log_single_family('screen_2024', txt_fus.STRUCTURED_FAMILY, structured_screen_row)
 
-    text_only_screen = fit_single_text_family(
+    text_only_screen = txt_fus.fit_single_text_family(
         train_core_df,
         screen_df,
         structured_feature_info,
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         final_model=False
     )
-    text_only_screen_row = build_single_row(
+    text_only_screen_row = txt_fus.build_single_row(
         'single_label',
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         input_path,
         text_sidecar_path,
         'screen_2024',
@@ -183,21 +150,21 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         fit_seconds=text_only_screen['fit_seconds']
     )
     screen_rows.append(text_only_screen_row)
-    log_single_family('screen_2024', TEXT_ONLY_FAMILY, text_only_screen_row)
+    log_single_family('screen_2024', txt_fus.TEXT_ONLY_FAMILY, text_only_screen_row)
 
     if args.skip_text_plus:
-        log_line('[single] screen_2024 text_plus_structured_linear skipped by flag')
+        txt_fus.log_line('[single] screen_2024 text_plus_structured_linear skipped by flag')
     else:
-        text_plus_screen = fit_single_text_family(
+        text_plus_screen = txt_fus.fit_single_text_family(
             train_core_df,
             screen_df,
             structured_feature_info,
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             final_model=False
         )
-        text_plus_screen_row = build_single_row(
+        text_plus_screen_row = txt_fus.build_single_row(
             'single_label',
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             input_path,
             text_sidecar_path,
             'screen_2024',
@@ -208,18 +175,18 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             fit_seconds=text_plus_screen['fit_seconds']
         )
         screen_rows.append(text_plus_screen_row)
-        log_single_family('screen_2024', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
+        log_single_family('screen_2024', txt_fus.TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
 
-    late_screen = select_single_fusion_weight(
+    late_screen = txt_fus.select_single_fusion_weight(
         screen_df[TARGET_COL].astype(str),
         text_only_screen['eval_proba'],
         text_only_screen['classes'],
         structured_screen['valid_proba'],
         structured_screen['classes']
     )
-    late_screen_row = build_single_row(
+    late_screen_row = txt_fus.build_single_row(
         'single_label',
-        LATE_FUSION_FAMILY,
+        txt_fus.LATE_FUSION_FAMILY,
         input_path,
         text_sidecar_path,
         'screen_2024',
@@ -232,11 +199,11 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         selected_text_weight=late_screen['selected_text_weight']
     )
     screen_rows.append(late_screen_row)
-    log_single_family('screen_2024', LATE_FUSION_FAMILY, late_screen_row)
+    log_single_family('screen_2024', txt_fus.LATE_FUSION_FAMILY, late_screen_row)
     completed_stages.append('screen_2024')
     emit_checkpoint('screen_2024_complete')
 
-    structured_select = fit_single_structured_family(
+    structured_select = txt_fus.fit_single_structured_family(
         dev_screen_df,
         select_df,
         structured_feature_info,
@@ -245,9 +212,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         devices=args.devices,
         random_seed=args.random_seed
     )
-    structured_select_row = build_single_row(
+    structured_select_row = txt_fus.build_single_row(
         'single_label',
-        STRUCTURED_FAMILY,
+        txt_fus.STRUCTURED_FAMILY,
         input_path,
         text_sidecar_path,
         'select_2025',
@@ -259,18 +226,18 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         selected_iteration=structured_select['selected_iteration']
     )
     select_rows.append(structured_select_row)
-    log_single_family('select_2025', STRUCTURED_FAMILY, structured_select_row)
+    log_single_family('select_2025', txt_fus.STRUCTURED_FAMILY, structured_select_row)
 
-    text_only_select = fit_single_text_family(
+    text_only_select = txt_fus.fit_single_text_family(
         dev_screen_df,
         select_df,
         structured_feature_info,
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         final_model=False
     )
-    text_only_select_row = build_single_row(
+    text_only_select_row = txt_fus.build_single_row(
         'single_label',
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         input_path,
         text_sidecar_path,
         'select_2025',
@@ -281,21 +248,21 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         fit_seconds=text_only_select['fit_seconds']
     )
     select_rows.append(text_only_select_row)
-    log_single_family('select_2025', TEXT_ONLY_FAMILY, text_only_select_row)
+    log_single_family('select_2025', txt_fus.TEXT_ONLY_FAMILY, text_only_select_row)
 
     if args.skip_text_plus:
-        log_line('[single] select_2025 text_plus_structured_linear skipped by flag')
+        txt_fus.log_line('[single] select_2025 text_plus_structured_linear skipped by flag')
     else:
-        text_plus_select = fit_single_text_family(
+        text_plus_select = txt_fus.fit_single_text_family(
             dev_screen_df,
             select_df,
             structured_feature_info,
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             final_model=False
         )
-        text_plus_select_row = build_single_row(
+        text_plus_select_row = txt_fus.build_single_row(
             'single_label',
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             input_path,
             text_sidecar_path,
             'select_2025',
@@ -306,9 +273,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             fit_seconds=text_plus_select['fit_seconds']
         )
         select_rows.append(text_plus_select_row)
-        log_single_family('select_2025', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
+        log_single_family('select_2025', txt_fus.TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
 
-    late_select = apply_single_fusion_weight(
+    late_select = txt_fus.apply_single_fusion_weight(
         select_df[TARGET_COL].astype(str),
         text_only_select['eval_proba'],
         text_only_select['classes'],
@@ -316,9 +283,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         structured_select['classes'],
         text_weight=late_screen['selected_text_weight']
     )
-    late_select_row = build_single_row(
+    late_select_row = txt_fus.build_single_row(
         'single_label',
-        LATE_FUSION_FAMILY,
+        txt_fus.LATE_FUSION_FAMILY,
         input_path,
         text_sidecar_path,
         'select_2025',
@@ -331,18 +298,18 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         selected_text_weight=late_screen['selected_text_weight']
     )
     select_rows.append(late_select_row)
-    log_single_family('select_2025', LATE_FUSION_FAMILY, late_select_row)
+    log_single_family('select_2025', txt_fus.LATE_FUSION_FAMILY, late_select_row)
 
     select_df_all = pd.DataFrame(select_rows)
-    current_best_row = select_best_row(
+    current_best_row = txt_fus.select_best_row(
         select_df_all,
         ['macro_f1', 'top_1_accuracy', 'top_3_accuracy']
     )
     selected_family = current_best_row['family_name']
     select_improvement = float(current_best_row['macro_f1'] - locked_single_select_row['macro_f1'])
-    select_gate_pass = select_improvement >= SINGLE_PROMOTE_SELECT_DELTA
+    select_gate_pass = select_improvement >= txt_fus.SINGLE_PROMOTE_SELECT_DELTA
     promotion_status = 'rejected_select'
-    log_line(
+    txt_fus.log_line(
         f'[single] select_2025 best={selected_family} '
         f'macro_f1={float(current_best_row["macro_f1"]):.4f} '
         f'delta_vs_locked={select_improvement:+.4f} '
@@ -358,7 +325,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     )
 
     if select_gate_pass:
-        log_line(f'[single] holdout_2026 start family={selected_family}')
+        txt_fus.log_line(f'[single] holdout_2026 start family={selected_family}')
         emit_checkpoint(
             'holdout_2026_started',
             selected_family=selected_family,
@@ -366,12 +333,12 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             select_gate_pass=select_gate_pass,
             promotion_status='running'
         )
-        if selected_family == STRUCTURED_FAMILY:
-            log_line(
+        if selected_family == txt_fus.STRUCTURED_FAMILY:
+            txt_fus.log_line(
                 f'[single] holdout_2026 fitting structured carry-forward '
                 f'iteration={int(structured_select["selected_iteration"])}'
             )
-            holdout_result = fit_single_structured_holdout(
+            holdout_result = txt_fus.fit_single_structured_holdout(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
@@ -381,13 +348,13 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 devices=args.devices,
                 random_seed=args.random_seed
             )
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 structured fit complete '
                 f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
-            holdout_row = build_single_row(
+            holdout_row = txt_fus.build_single_row(
                 'single_label',
-                STRUCTURED_FAMILY,
+                txt_fus.STRUCTURED_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -398,21 +365,21 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 fit_seconds=holdout_result['fit_seconds'],
                 selected_iteration=structured_select['selected_iteration']
             )
-        elif selected_family == TEXT_ONLY_FAMILY:
-            log_line(
+        elif selected_family == txt_fus.TEXT_ONLY_FAMILY:
+            txt_fus.log_line(
                 f'[single] holdout_2026 fitting final text-only linear model '
                 f'dev_rows={len(dev_select_df):,} '
                 f'final_model={args.final_linear_model}'
             )
-            holdout_result = fit_single_text_family(
+            holdout_result = txt_fus.fit_single_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
-                TEXT_ONLY_FAMILY,
+                txt_fus.TEXT_ONLY_FAMILY,
                 final_model=True,
                 final_model_kind=args.final_linear_model
             )
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 text-only fit complete '
                 f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
@@ -422,9 +389,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 'pred': holdout_result['pred'],
                 'classes': holdout_result['classes']
             }
-            holdout_row = build_single_row(
+            holdout_row = txt_fus.build_single_row(
                 'single_label',
-                TEXT_ONLY_FAMILY,
+                txt_fus.TEXT_ONLY_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -434,21 +401,21 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 holdout_result['classes'],
                 fit_seconds=holdout_result['fit_seconds']
             )
-        elif selected_family == TEXT_PLUS_STRUCTURED_FAMILY:
-            log_line(
+        elif selected_family == txt_fus.TEXT_PLUS_STRUCTURED_FAMILY:
+            txt_fus.log_line(
                 f'[single] holdout_2026 fitting final text+structured linear model '
                 f'dev_rows={len(dev_select_df):,} '
                 f'final_model={args.final_linear_model}'
             )
-            holdout_result = fit_single_text_family(
+            holdout_result = txt_fus.fit_single_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
-                TEXT_PLUS_STRUCTURED_FAMILY,
+                txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
                 final_model=True,
                 final_model_kind=args.final_linear_model
             )
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 text+structured fit complete '
                 f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
@@ -458,9 +425,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 'pred': holdout_result['pred'],
                 'classes': holdout_result['classes']
             }
-            holdout_row = build_single_row(
+            holdout_row = txt_fus.build_single_row(
                 'single_label',
-                TEXT_PLUS_STRUCTURED_FAMILY,
+                txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -471,11 +438,11 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 fit_seconds=holdout_result['fit_seconds']
             )
         else:
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 fitting late-fusion structured branch '
                 f'iteration={int(structured_select["selected_iteration"])}'
             )
-            structured_holdout = fit_single_structured_holdout(
+            structured_holdout = txt_fus.fit_single_structured_holdout(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
@@ -485,29 +452,29 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 devices=args.devices,
                 random_seed=args.random_seed
             )
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 structured branch complete '
                 f'fit_seconds={float(structured_holdout["fit_seconds"]):.2f}'
             )
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 fitting late-fusion text branch '
                 f'text_weight={float(late_screen["selected_text_weight"]):.2f} '
                 f'dev_rows={len(dev_select_df):,} '
                 f'final_model={args.final_linear_model}'
             )
-            text_holdout = fit_single_text_family(
+            text_holdout = txt_fus.fit_single_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
-                TEXT_ONLY_FAMILY,
+                txt_fus.TEXT_ONLY_FAMILY,
                 final_model=True,
                 final_model_kind=args.final_linear_model
             )
-            log_line(
+            txt_fus.log_line(
                 f'[single] holdout_2026 text branch complete '
                 f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
-            late_holdout = apply_single_fusion_weight(
+            late_holdout = txt_fus.apply_single_fusion_weight(
                 holdout_df[TARGET_COL].astype(str),
                 text_holdout['eval_proba'],
                 text_holdout['classes'],
@@ -521,9 +488,9 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 'pred': late_holdout['pred'],
                 'classes': late_holdout['classes']
             }
-            holdout_row = build_single_row(
+            holdout_row = txt_fus.build_single_row(
                 'single_label',
-                LATE_FUSION_FAMILY,
+                txt_fus.LATE_FUSION_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -561,12 +528,12 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             focus_groups
         )
 
-        if selected_family in TEXT_FAMILIES:
-            overlap_mask = build_overlap_mask(
+        if selected_family in txt_fus.TEXT_FAMILIES:
+            overlap_mask = txt_fus.build_overlap_mask(
                 dev_select_df['cdescr_model_text'],
                 holdout_df['cdescr_model_text']
             )
-            slice_rows = build_single_overlap_rows(
+            slice_rows = txt_fus.build_single_overlap_rows(
                 holdout_row,
                 holdout_df[TARGET_COL].astype(str),
                 holdout_result['proba'],
@@ -578,16 +545,16 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
 
         holdout_macro_gain = float(holdout_row['macro_f1'] - locked_single_manifest['official_holdout_metrics']['macro_f1'])
         holdout_top3_ok = holdout_row['top_3_accuracy'] >= (
-            locked_single_manifest['official_holdout_metrics']['top_3_accuracy'] - SINGLE_TOP3_DROP_LIMIT
+            locked_single_manifest['official_holdout_metrics']['top_3_accuracy'] - txt_fus.SINGLE_TOP3_DROP_LIMIT
         )
         holdout_ece = float(calibration_df.loc[calibration_df['section'].eq('overall'), 'ece'].iloc[0])
-        holdout_ece_ok = (holdout_ece - locked_single_ece) <= SINGLE_ECE_WORSE_LIMIT
+        holdout_ece_ok = (holdout_ece - locked_single_ece) <= txt_fus.SINGLE_ECE_WORSE_LIMIT
         promotion_status = 'promoted' if (
-            holdout_macro_gain >= SINGLE_PROMOTE_HOLDOUT_DELTA
+            holdout_macro_gain >= txt_fus.SINGLE_PROMOTE_HOLDOUT_DELTA
             and holdout_top3_ok
             and holdout_ece_ok
         ) else 'rejected_holdout'
-        log_line(
+        txt_fus.log_line(
             f'[single] holdout_2026 promotion_status={promotion_status} '
             f'macro_gain={holdout_macro_gain:+.4f} '
             f'top3_ok={str(bool(holdout_top3_ok)).lower()} '
@@ -602,7 +569,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
             promotion_status=promotion_status
         )
     else:
-        log_line(
+        txt_fus.log_line(
             f'[single] select_2025 gate rejected; skipping holdout '
             f'family={selected_family}'
         )
@@ -620,7 +587,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         'split_df': split_parts['split_df'],
         'screen_df': pd.DataFrame(screen_rows),
         'select_df': select_df_all,
-        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_single_holdout_df(),
+        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_single_holdout_df(),
         'class_df': class_df,
         'confusion_df': confusion_df,
         'calibration_df': calibration_df,
@@ -643,14 +610,14 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     screen_rows = []
     select_rows = []
     holdout_rows = []
-    label_df = empty_multi_label_df()
+    label_df = txt_fus.empty_multi_label_df()
     overlap_metrics = []
     completed_stages = []
 
     raw_df, input_path = load_frame(MULTI_INPUT_STEM, input_path=args.multi_input_path)
     sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
     case_df = prep_multi_label_cases(raw_df, structured_feature_info['feature_cols'])
-    case_df = merge_text_sidecar(case_df, sidecar_df)
+    case_df = txt_fus.merge_text_sidecar(case_df, sidecar_df)
     split_parts = split_multi_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)
 
     train_core_df = split_parts['train_core']
@@ -660,7 +627,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     dev_select_df = split_parts['dev_2020_2025']
     holdout_df = split_parts['holdout_2026']
 
-    log_line(
+    txt_fus.log_line(
         f'[multi] Split rows | train_core={len(train_core_df):,} screen_2024={len(screen_df):,} '
         f'select_2025={len(select_df):,} holdout_2026={len(holdout_df):,} '
         f'final_linear_model={args.final_linear_model}'
@@ -677,7 +644,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 'split_df': split_parts['split_df'],
                 'screen_df': pd.DataFrame(screen_rows),
                 'select_df': pd.DataFrame(select_rows),
-                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_multi_holdout_df(),
+                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_multi_holdout_df(),
                 'label_df': label_df,
                 'selected_family': selected_family,
                 'final_linear_model': args.final_linear_model,
@@ -691,7 +658,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             }
         )
 
-    structured_screen = fit_multi_structured_family(
+    structured_screen = txt_fus.fit_multi_structured_family(
         train_core_df,
         screen_df,
         structured_feature_info,
@@ -699,9 +666,9 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         devices=args.devices,
         random_seed=args.random_seed
     )
-    structured_screen_row = build_multi_row(
+    structured_screen_row = txt_fus.build_multi_row(
         'multi_label',
-        STRUCTURED_FAMILY,
+        txt_fus.STRUCTURED_FAMILY,
         input_path,
         text_sidecar_path,
         'screen_2024',
@@ -715,18 +682,18 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     )
     structured_screen_row['actual_task_type'] = structured_screen['actual_task_type']
     screen_rows.append(structured_screen_row)
-    log_multi_family('screen_2024', STRUCTURED_FAMILY, structured_screen_row)
+    log_multi_family('screen_2024', txt_fus.STRUCTURED_FAMILY, structured_screen_row)
 
-    text_only_screen = fit_multi_text_family(
+    text_only_screen = txt_fus.fit_multi_text_family(
         train_core_df,
         screen_df,
         structured_feature_info,
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         final_model=False
     )
-    text_only_screen_row = build_multi_row(
+    text_only_screen_row = txt_fus.build_multi_row(
         'multi_label',
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         input_path,
         text_sidecar_path,
         'screen_2024',
@@ -738,21 +705,21 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         fit_seconds=text_only_screen['fit_seconds']
     )
     screen_rows.append(text_only_screen_row)
-    log_multi_family('screen_2024', TEXT_ONLY_FAMILY, text_only_screen_row)
+    log_multi_family('screen_2024', txt_fus.TEXT_ONLY_FAMILY, text_only_screen_row)
 
     if args.skip_text_plus:
-        log_line('[multi] screen_2024 text_plus_structured_linear skipped by flag')
+        txt_fus.log_line('[multi] screen_2024 text_plus_structured_linear skipped by flag')
     else:
-        text_plus_screen = fit_multi_text_family(
+        text_plus_screen = txt_fus.fit_multi_text_family(
             train_core_df,
             screen_df,
             structured_feature_info,
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             final_model=False
         )
-        text_plus_screen_row = build_multi_row(
+        text_plus_screen_row = txt_fus.build_multi_row(
             'multi_label',
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             input_path,
             text_sidecar_path,
             'screen_2024',
@@ -764,16 +731,16 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             fit_seconds=text_plus_screen['fit_seconds']
         )
         screen_rows.append(text_plus_screen_row)
-        log_multi_family('screen_2024', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
+        log_multi_family('screen_2024', txt_fus.TEXT_PLUS_STRUCTURED_FAMILY, text_plus_screen_row)
 
-    late_screen = select_multi_fusion_weight(
+    late_screen = txt_fus.select_multi_fusion_weight(
         structured_screen['y_eval'],
         text_only_screen['eval_proba'],
         structured_screen['valid_proba']
     )
-    late_screen_row = build_multi_row(
+    late_screen_row = txt_fus.build_multi_row(
         'multi_label',
-        LATE_FUSION_FAMILY,
+        txt_fus.LATE_FUSION_FAMILY,
         input_path,
         text_sidecar_path,
         'screen_2024',
@@ -787,11 +754,11 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         selected_text_weight=late_screen['selected_text_weight']
     )
     screen_rows.append(late_screen_row)
-    log_multi_family('screen_2024', LATE_FUSION_FAMILY, late_screen_row)
+    log_multi_family('screen_2024', txt_fus.LATE_FUSION_FAMILY, late_screen_row)
     completed_stages.append('screen_2024')
     emit_checkpoint('screen_2024_complete')
 
-    structured_select = fit_multi_structured_family(
+    structured_select = txt_fus.fit_multi_structured_family(
         dev_screen_df,
         select_df,
         structured_feature_info,
@@ -799,9 +766,9 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         devices=args.devices,
         random_seed=args.random_seed
     )
-    structured_select_row = build_multi_row(
+    structured_select_row = txt_fus.build_multi_row(
         'multi_label',
-        STRUCTURED_FAMILY,
+        txt_fus.STRUCTURED_FAMILY,
         input_path,
         text_sidecar_path,
         'select_2025',
@@ -815,18 +782,18 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     )
     structured_select_row['actual_task_type'] = structured_select['actual_task_type']
     select_rows.append(structured_select_row)
-    log_multi_family('select_2025', STRUCTURED_FAMILY, structured_select_row)
+    log_multi_family('select_2025', txt_fus.STRUCTURED_FAMILY, structured_select_row)
 
-    text_only_select = fit_multi_text_family(
+    text_only_select = txt_fus.fit_multi_text_family(
         dev_screen_df,
         select_df,
         structured_feature_info,
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         final_model=False
     )
-    text_only_select_row = build_multi_row(
+    text_only_select_row = txt_fus.build_multi_row(
         'multi_label',
-        TEXT_ONLY_FAMILY,
+        txt_fus.TEXT_ONLY_FAMILY,
         input_path,
         text_sidecar_path,
         'select_2025',
@@ -838,21 +805,21 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         fit_seconds=text_only_select['fit_seconds']
     )
     select_rows.append(text_only_select_row)
-    log_multi_family('select_2025', TEXT_ONLY_FAMILY, text_only_select_row)
+    log_multi_family('select_2025', txt_fus.TEXT_ONLY_FAMILY, text_only_select_row)
 
     if args.skip_text_plus:
-        log_line('[multi] select_2025 text_plus_structured_linear skipped by flag')
+        txt_fus.log_line('[multi] select_2025 text_plus_structured_linear skipped by flag')
     else:
-        text_plus_select = fit_multi_text_family(
+        text_plus_select = txt_fus.fit_multi_text_family(
             dev_screen_df,
             select_df,
             structured_feature_info,
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             final_model=False
         )
-        text_plus_select_row = build_multi_row(
+        text_plus_select_row = txt_fus.build_multi_row(
             'multi_label',
-            TEXT_PLUS_STRUCTURED_FAMILY,
+            txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
             input_path,
             text_sidecar_path,
             'select_2025',
@@ -864,17 +831,17 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             fit_seconds=text_plus_select['fit_seconds']
         )
         select_rows.append(text_plus_select_row)
-        log_multi_family('select_2025', TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
+        log_multi_family('select_2025', txt_fus.TEXT_PLUS_STRUCTURED_FAMILY, text_plus_select_row)
 
-    late_select = apply_multi_fusion_weight(
+    late_select = txt_fus.apply_multi_fusion_weight(
         structured_select['y_eval'],
         text_only_select['eval_proba'],
         structured_select['valid_proba'],
         text_weight=late_screen['selected_text_weight']
     )
-    late_select_row = build_multi_row(
+    late_select_row = txt_fus.build_multi_row(
         'multi_label',
-        LATE_FUSION_FAMILY,
+        txt_fus.LATE_FUSION_FAMILY,
         input_path,
         text_sidecar_path,
         'select_2025',
@@ -888,18 +855,18 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         selected_text_weight=late_screen['selected_text_weight']
     )
     select_rows.append(late_select_row)
-    log_multi_family('select_2025', LATE_FUSION_FAMILY, late_select_row)
+    log_multi_family('select_2025', txt_fus.LATE_FUSION_FAMILY, late_select_row)
 
     select_df_all = pd.DataFrame(select_rows)
-    current_best_row = select_best_row(
+    current_best_row = txt_fus.select_best_row(
         select_df_all,
         ['macro_f1', 'micro_f1', 'recall_at_3', 'precision_at_3']
     )
     selected_family = current_best_row['family_name']
     select_improvement = float(current_best_row['macro_f1'] - locked_multi_select_row['macro_f1'])
-    select_gate_pass = select_improvement >= MULTI_PROMOTE_SELECT_DELTA
+    select_gate_pass = select_improvement >= txt_fus.MULTI_PROMOTE_SELECT_DELTA
     promotion_status = 'rejected_select'
-    log_line(
+    txt_fus.log_line(
         f'[multi] select_2025 best={selected_family} '
         f'macro_f1={float(current_best_row["macro_f1"]):.4f} '
         f'delta_vs_locked={select_improvement:+.4f} '
@@ -915,7 +882,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     )
 
     if select_gate_pass:
-        log_line(f'[multi] holdout_2026 start family={selected_family}')
+        txt_fus.log_line(f'[multi] holdout_2026 start family={selected_family}')
         emit_checkpoint(
             'holdout_2026_started',
             selected_family=selected_family,
@@ -923,13 +890,13 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             select_gate_pass=select_gate_pass,
             promotion_status='running'
         )
-        if selected_family == STRUCTURED_FAMILY:
-            log_line(
+        if selected_family == txt_fus.STRUCTURED_FAMILY:
+            txt_fus.log_line(
                 f'[multi] holdout_2026 fitting structured carry-forward '
                 f'iteration={int(structured_select["selected_iteration"])} '
                 f'threshold={float(structured_select["selected_threshold"]):.3f}'
             )
-            holdout_result = fit_multi_structured_holdout(
+            holdout_result = txt_fus.fit_multi_structured_holdout(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
@@ -937,16 +904,16 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 devices=args.devices,
                 random_seed=args.random_seed
             )
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 structured fit complete '
                 f'fit_seconds={float(holdout_result["fit_seconds"]):.2f}'
             )
             y_holdout = holdout_result['y_holdout']
             holdout_pred = holdout_result['holdout_pred']
             holdout_proba = holdout_result['holdout_proba']
-            holdout_row = build_multi_row(
+            holdout_row = txt_fus.build_multi_row(
                 'multi_label',
-                STRUCTURED_FAMILY,
+                txt_fus.STRUCTURED_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -959,21 +926,21 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 selected_iteration=holdout_result['selected_iteration']
             )
             mlb = holdout_result['mlb']
-        elif selected_family == TEXT_ONLY_FAMILY:
-            log_line(
+        elif selected_family == txt_fus.TEXT_ONLY_FAMILY:
+            txt_fus.log_line(
                 f'[multi] holdout_2026 fitting final text-only linear model '
                 f'dev_rows={len(dev_select_df):,} '
                 f'final_model={args.final_linear_model}'
             )
-            text_holdout = fit_multi_text_family(
+            text_holdout = txt_fus.fit_multi_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
-                TEXT_ONLY_FAMILY,
+                txt_fus.TEXT_ONLY_FAMILY,
                 final_model=True,
                 final_model_kind=args.final_linear_model
             )
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 text-only fit complete '
                 f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
@@ -982,11 +949,11 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             holdout_pred = apply_multilabel_threshold(
                 holdout_proba,
                 text_only_select['threshold_choice']['threshold'],
-                min_positive_labels=MIN_POSITIVE_LABELS
+                min_positive_labels=txt_fus.MIN_POSITIVE_LABELS
             )
-            holdout_row = build_multi_row(
+            holdout_row = txt_fus.build_multi_row(
                 'multi_label',
-                TEXT_ONLY_FAMILY,
+                txt_fus.TEXT_ONLY_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -998,21 +965,21 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 fit_seconds=text_holdout['fit_seconds']
             )
             mlb = text_holdout['mlb']
-        elif selected_family == TEXT_PLUS_STRUCTURED_FAMILY:
-            log_line(
+        elif selected_family == txt_fus.TEXT_PLUS_STRUCTURED_FAMILY:
+            txt_fus.log_line(
                 f'[multi] holdout_2026 fitting final text+structured linear model '
                 f'dev_rows={len(dev_select_df):,} '
                 f'final_model={args.final_linear_model}'
             )
-            text_holdout = fit_multi_text_family(
+            text_holdout = txt_fus.fit_multi_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
-                TEXT_PLUS_STRUCTURED_FAMILY,
+                txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
                 final_model=True,
                 final_model_kind=args.final_linear_model
             )
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 text+structured fit complete '
                 f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
@@ -1021,11 +988,11 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             holdout_pred = apply_multilabel_threshold(
                 holdout_proba,
                 text_plus_select['threshold_choice']['threshold'],
-                min_positive_labels=MIN_POSITIVE_LABELS
+                min_positive_labels=txt_fus.MIN_POSITIVE_LABELS
             )
-            holdout_row = build_multi_row(
+            holdout_row = txt_fus.build_multi_row(
                 'multi_label',
-                TEXT_PLUS_STRUCTURED_FAMILY,
+                txt_fus.TEXT_PLUS_STRUCTURED_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -1038,12 +1005,12 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             )
             mlb = text_holdout['mlb']
         else:
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 fitting late-fusion structured branch '
                 f'iteration={int(structured_select["selected_iteration"])} '
                 f'text_weight={float(late_screen["selected_text_weight"]):.2f}'
             )
-            structured_holdout = fit_multi_structured_holdout(
+            structured_holdout = txt_fus.fit_multi_structured_holdout(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
@@ -1051,24 +1018,24 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 devices=args.devices,
                 random_seed=args.random_seed
             )
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 structured branch complete '
                 f'fit_seconds={float(structured_holdout["fit_seconds"]):.2f}'
             )
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 fitting late-fusion text branch '
                 f'dev_rows={len(dev_select_df):,} '
                 f'final_model={args.final_linear_model}'
             )
-            text_holdout = fit_multi_text_family(
+            text_holdout = txt_fus.fit_multi_text_family(
                 dev_select_df,
                 holdout_df,
                 structured_feature_info,
-                TEXT_ONLY_FAMILY,
+                txt_fus.TEXT_ONLY_FAMILY,
                 final_model=True,
                 final_model_kind=args.final_linear_model
             )
-            log_line(
+            txt_fus.log_line(
                 f'[multi] holdout_2026 text branch complete '
                 f'fit_seconds={float(text_holdout["fit_seconds"]):.2f}'
             )
@@ -1080,11 +1047,11 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             holdout_pred = apply_multilabel_threshold(
                 holdout_proba,
                 late_select['selected_threshold'],
-                min_positive_labels=MIN_POSITIVE_LABELS
+                min_positive_labels=txt_fus.MIN_POSITIVE_LABELS
             )
-            holdout_row = build_multi_row(
+            holdout_row = txt_fus.build_multi_row(
                 'multi_label',
-                LATE_FUSION_FAMILY,
+                txt_fus.LATE_FUSION_FAMILY,
                 input_path,
                 text_sidecar_path,
                 'final_holdout',
@@ -1117,12 +1084,12 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             }
         ).sort_values(['support', 'f1'], ascending=[False, False]).reset_index(drop=True)
 
-        if selected_family in TEXT_FAMILIES:
-            overlap_mask = build_overlap_mask(
+        if selected_family in txt_fus.TEXT_FAMILIES:
+            overlap_mask = txt_fus.build_overlap_mask(
                 dev_select_df['cdescr_model_text'],
                 holdout_df['cdescr_model_text']
             )
-            slice_rows = build_multi_overlap_rows(
+            slice_rows = txt_fus.build_multi_overlap_rows(
                 holdout_row,
                 y_holdout,
                 holdout_pred,
@@ -1136,11 +1103,11 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         macro_gain = float(holdout_row['macro_f1'] - locked_holdout['macro_f1'])
         micro_gain = float(holdout_row['micro_f1'] - locked_holdout['micro_f1'])
         promotion_status = 'promoted' if (
-            (macro_gain >= MULTI_PROMOTE_HOLDOUT_MACRO_DELTA or micro_gain >= MULTI_PROMOTE_HOLDOUT_MICRO_DELTA)
+            (macro_gain >= txt_fus.MULTI_PROMOTE_HOLDOUT_MACRO_DELTA or micro_gain >= txt_fus.MULTI_PROMOTE_HOLDOUT_MICRO_DELTA)
             and holdout_row['recall_at_3'] >= locked_holdout['recall_at_3']
-            and holdout_row['label_coverage'] >= MULTI_LABEL_COVERAGE_FLOOR
+            and holdout_row['label_coverage'] >= txt_fus.MULTI_LABEL_COVERAGE_FLOOR
         ) else 'rejected_holdout'
-        log_line(
+        txt_fus.log_line(
             f'[multi] holdout_2026 promotion_status={promotion_status} '
             f'macro_gain={macro_gain:+.4f} '
             f'micro_gain={micro_gain:+.4f} '
@@ -1156,7 +1123,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
             promotion_status=promotion_status
         )
     else:
-        log_line(
+        txt_fus.log_line(
             f'[multi] select_2025 gate rejected; skipping holdout '
             f'family={selected_family}'
         )
@@ -1174,7 +1141,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         'split_df': split_parts['split_df'],
         'screen_df': pd.DataFrame(screen_rows),
         'select_df': select_df_all,
-        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else empty_multi_holdout_df(),
+        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_multi_holdout_df(),
         'label_df': label_df,
         'selected_family': selected_family,
         'final_linear_model': args.final_linear_model,
@@ -1223,8 +1190,8 @@ def parse_args():
     )
     parser.add_argument(
         '--final-linear-model',
-        choices=FINAL_LINEAR_MODEL_CHOICES,
-        default=FINAL_LINEAR_MODEL_DEFAULT,
+        choices=txt_fus.FINAL_LINEAR_MODEL_CHOICES,
+        default=txt_fus.FINAL_LINEAR_MODEL_DEFAULT,
         help='Final refit estimator for promoted text families'
     )
     return parser.parse_args()
@@ -1237,31 +1204,32 @@ def main():
     if args.skip_single and args.skip_multi:
         raise ValueError('Nothing to do: both single and multi tasks were skipped')
 
-    structured_feature_info = feature_manifest(STRUCTURED_FEATURE_SET)
-    locked_single_select_row = read_locked_single_select_baseline()
-    locked_multi_select_row = read_locked_multi_select_baseline()
-    locked_single_manifest = load_json(LOCKED_SINGLE_MANIFEST)
-    locked_multi_manifest = load_json(LOCKED_MULTI_MANIFEST)
-    locked_single_selection = load_json(LOCKED_SINGLE_SELECTION)
-    locked_single_ece = read_locked_single_ece()
+    structured_feature_info = feature_manifest(txt_fus.STRUCTURED_FEATURE_SET)
+    locked_single_select_row = txt_fus.read_locked_single_select_baseline()
+    locked_multi_select_row = txt_fus.read_locked_multi_select_baseline()
+    locked_single_manifest = txt_fus.load_json(txt_fus.LOCKED_SINGLE_MANIFEST)
+    locked_multi_manifest = txt_fus.load_json(txt_fus.LOCKED_MULTI_MANIFEST)
+    locked_single_selection = txt_fus.load_json(txt_fus.LOCKED_SINGLE_SELECTION)
+    locked_single_ece = txt_fus.read_locked_single_ece()
 
     manifest = {
-        'artifact_role': FEATUREWAVE_TASK,
+        'artifact_role': txt_fus.FEATUREWAVE_TASK,
         'feature_wave': 2,
         'split_mode': FEATURE_WAVE1_SPLIT_MODE,
         'public_benchmark_locked': True,
         'run_status': 'running',
-        'structured_companion_feature_set': STRUCTURED_FEATURE_SET,
+        'structured_companion_feature_set': txt_fus.STRUCTURED_FEATURE_SET,
         'final_linear_model': args.final_linear_model,
-        'text_config': TEXT_CONFIG,
+        'text_config': txt_fus.TEXT_CONFIG,
         'last_checkpoint': None,
         'tasks': {}
     }
-    write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+    write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
 
     def checkpoint_single(stage_name, result):
-        write_single_outputs(result)
-        manifest['tasks']['single_label'] = build_single_manifest_entry(
+        # CSV wave 2 artifacts deleted per bloat reduction
+        # txt_fus.write_single_outputs(result)
+        manifest['tasks']['single_label'] = txt_fus.build_single_manifest_entry(
             result,
             locked_single_select_row,
             locked_single_manifest['official_holdout_metrics'],
@@ -1271,11 +1239,12 @@ def main():
             'task': 'single_label',
             'stage': stage_name
         }
-        write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+        write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
 
     def checkpoint_multi(stage_name, result):
-        write_multi_outputs(result)
-        manifest['tasks']['multi_label'] = build_multi_manifest_entry(
+        # CSV wave 2 artifacts deleted per bloat reduction
+        # txt_fus.write_multi_outputs(result)
+        manifest['tasks']['multi_label'] = txt_fus.build_multi_manifest_entry(
             result,
             locked_multi_select_row,
             locked_multi_manifest['official_holdout_metrics']
@@ -1284,11 +1253,11 @@ def main():
             'task': 'multi_label',
             'stage': stage_name
         }
-        write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+        write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
 
     try:
         if not args.skip_single:
-            log_line('[run] Single-label text wave 2')
+            txt_fus.log_line('[run] Single-label text wave 2')
             single_result = run_single_wave(
                 args,
                 structured_feature_info,
@@ -1298,8 +1267,9 @@ def main():
                 locked_single_selection,
                 checkpoint_fn=checkpoint_single
             )
-            write_single_outputs(single_result)
-            manifest['tasks']['single_label'] = build_single_manifest_entry(
+            # CSV wave 2 artifacts deleted per bloat reduction
+            # txt_fus.write_single_outputs(single_result)
+            manifest['tasks']['single_label'] = txt_fus.build_single_manifest_entry(
                 single_result,
                 locked_single_select_row,
                 locked_single_manifest['official_holdout_metrics'],
@@ -1307,7 +1277,7 @@ def main():
             )
 
         if not args.skip_multi:
-            log_line('[run] Multi-label text wave 2')
+            txt_fus.log_line('[run] Multi-label text wave 2')
             multi_result = run_multi_wave(
                 args,
                 structured_feature_info,
@@ -1315,8 +1285,9 @@ def main():
                 locked_multi_manifest,
                 checkpoint_fn=checkpoint_multi
             )
-            write_multi_outputs(multi_result)
-            manifest['tasks']['multi_label'] = build_multi_manifest_entry(
+            # CSV wave 2 artifacts deleted per bloat reduction
+            # txt_fus.write_multi_outputs(multi_result)
+            manifest['tasks']['multi_label'] = txt_fus.build_multi_manifest_entry(
                 multi_result,
                 locked_multi_select_row,
                 locked_multi_manifest['official_holdout_metrics']
@@ -1324,12 +1295,12 @@ def main():
     except Exception as exc:
         manifest['run_status'] = 'failed'
         manifest['error'] = str(exc)
-        write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
+        write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
         raise
 
     manifest['run_status'] = 'completed'
-    write_json(manifest, OUTPUTS_DIR / GLOBAL_MANIFEST_NAME)
-    print(f'[write] {OUTPUTS_DIR / GLOBAL_MANIFEST_NAME}')
+    write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
+    print(f'[write] {OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME}')
     print('[done] Component text wave 2 finished')
     return 0
 

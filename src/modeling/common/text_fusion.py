@@ -1,6 +1,4 @@
-import argparse
 import json
-import sys
 from pathlib import Path
 from time import perf_counter
 
@@ -11,7 +9,6 @@ from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import SGDClassifier
-from sklearn.metrics import precision_recall_fscore_support
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
@@ -23,45 +20,28 @@ from sklearn.preprocessing import (
 )
 
 from src.config import settings
-from src.config.paths import OUTPUTS_DIR, ensure_project_directories
-from src.data.io_utils import load_frame, write_json
-from src.features.component_text_sidecar import SIDECAR_STEM
-from src.modeling.common.core import (
+from src.config.contracts import FEATURE_WAVE1_SPLIT_MODE
+from src.config.paths import OUTPUTS_DIR
+from src.modeling.common.helpers import (
+    CATBOOST_NAME,
     DATE_COL,
-    FEATURE_WAVE1_SPLIT_MODE,
+    DEF_CATBOOST_EVAL_PERIOD,
+    DEF_CATBOOST_ITERS,
     ID_COL,
-    MAX_TOP_K,
-    MULTI_INPUT_STEM,
     MULTI_TARGET_COL,
-    SINGLE_INPUT_STEM,
     TARGET_COL,
     apply_multilabel_threshold,
     build_catboost_model,
-    build_multiclass_calibration_df,
-    build_multiclass_class_df,
-    build_multiclass_confusion_df,
+    build_metric_row,
     build_multiclass_metric_row,
-    feature_manifest,
+    fit_catboost_holdout_stage,
+    fit_catboost_selection_stage,
     fit_catboost_with_external_selection,
     parse_pipe_labels,
     prep_catboost_frames,
-    prep_multi_label_cases,
-    prep_single_label_cases,
     score_multiclass_from_proba,
     select_multilabel_threshold,
-    split_multi_label_cases_by_mode,
-    split_single_label_cases_by_mode,
     subset_case_frame,
-)
-from src.modeling.common.multilabel import (
-    CATBOOST_NAME,
-    DEF_CATBOOST_EVAL_PERIOD,
-    DEF_CATBOOST_ITERS,
-    fit_catboost_holdout_with_fallback,
-    fit_catboost_selection_with_fallback,
-)
-from src.modeling.common.multilabel import (
-    build_metric_row as build_multilabel_metric_row,
 )
 
 # Shared Wave 2 text and fusion helpers
@@ -83,16 +63,6 @@ LOCKED_MULTI_MANIFEST = OUTPUTS_DIR / 'component_multilabel_manifest.json'
 # Output names
 # -----------------------------------------------------------------------------
 GLOBAL_MANIFEST_NAME = 'component_textwave2_manifest.json'
-SINGLE_SCREEN_NAME = 'component_single_label_textwave2_screen.csv'
-SINGLE_SELECT_NAME = 'component_single_label_textwave2_select.csv'
-SINGLE_HOLDOUT_NAME = 'component_single_label_textwave2_holdout.csv'
-SINGLE_CLASS_NAME = 'component_single_label_textwave2_class_metrics.csv'
-SINGLE_CONFUSION_NAME = 'component_single_label_textwave2_confusion_major.csv'
-SINGLE_CALIB_NAME = 'component_single_label_textwave2_calibration.csv'
-MULTI_SCREEN_NAME = 'component_multilabel_textwave2_screen.csv'
-MULTI_SELECT_NAME = 'component_multilabel_textwave2_select.csv'
-MULTI_HOLDOUT_NAME = 'component_multilabel_textwave2_holdout.csv'
-MULTI_LABEL_NAME = 'component_multilabel_textwave2_label_metrics.csv'
 
 
 # -----------------------------------------------------------------------------
@@ -360,20 +330,6 @@ def empty_multi_label_df():
     )
 
 
-def write_single_outputs(result):
-    result.get('screen_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / SINGLE_SCREEN_NAME, index=False)
-    result.get('select_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / SINGLE_SELECT_NAME, index=False)
-    result.get('holdout_df', empty_single_holdout_df()).to_csv(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME, index=False)
-    result.get('class_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / SINGLE_CLASS_NAME, index=False)
-    result.get('confusion_df', empty_single_confusion_df()).to_csv(OUTPUTS_DIR / SINGLE_CONFUSION_NAME, index=False)
-    result.get('calibration_df', empty_single_calibration_df()).to_csv(OUTPUTS_DIR / SINGLE_CALIB_NAME, index=False)
-
-
-def write_multi_outputs(result):
-    result.get('screen_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / MULTI_SCREEN_NAME, index=False)
-    result.get('select_df', pd.DataFrame()).to_csv(OUTPUTS_DIR / MULTI_SELECT_NAME, index=False)
-    result.get('holdout_df', empty_multi_holdout_df()).to_csv(OUTPUTS_DIR / MULTI_HOLDOUT_NAME, index=False)
-    result.get('label_df', empty_multi_label_df()).to_csv(OUTPUTS_DIR / MULTI_LABEL_NAME, index=False)
 
 
 def build_single_manifest_entry(result, locked_select_baseline, locked_holdout_baseline, locked_holdout_ece):
@@ -392,14 +348,7 @@ def build_single_manifest_entry(result, locked_select_baseline, locked_holdout_b
         'holdout_overlap_slices': result.get('overlap_metrics', []),
         'checkpoint_stage': result.get('checkpoint_stage'),
         'completed_stages': result.get('completed_stages', []),
-        'artifacts': {
-            'screen': str(OUTPUTS_DIR / SINGLE_SCREEN_NAME),
-            'select': str(OUTPUTS_DIR / SINGLE_SELECT_NAME),
-            'holdout': str(OUTPUTS_DIR / SINGLE_HOLDOUT_NAME),
-            'class_metrics': str(OUTPUTS_DIR / SINGLE_CLASS_NAME),
-            'confusion_major': str(OUTPUTS_DIR / SINGLE_CONFUSION_NAME),
-            'calibration': str(OUTPUTS_DIR / SINGLE_CALIB_NAME)
-        }
+        'artifacts': {}
     }
 
 
@@ -418,12 +367,7 @@ def build_multi_manifest_entry(result, locked_select_baseline, locked_holdout_ba
         'holdout_overlap_slices': result.get('overlap_metrics', []),
         'checkpoint_stage': result.get('checkpoint_stage'),
         'completed_stages': result.get('completed_stages', []),
-        'artifacts': {
-            'screen': str(OUTPUTS_DIR / MULTI_SCREEN_NAME),
-            'select': str(OUTPUTS_DIR / MULTI_SELECT_NAME),
-            'holdout': str(OUTPUTS_DIR / MULTI_HOLDOUT_NAME),
-            'label_metrics': str(OUTPUTS_DIR / MULTI_LABEL_NAME)
-        }
+        'artifacts': {}
     }
 
 
@@ -922,7 +866,7 @@ def build_single_row(task_name, family_name, input_path, text_sidecar_path, stag
 def build_multi_row(task_name, family_name, input_path, text_sidecar_path, stage_name, split_name, y_true, pred, proba, threshold=np.nan, fit_seconds=np.nan, selected_iteration=np.nan, selected_text_weight=np.nan, prior_text_overlap='all'):
     return {
         **base_row(task_name, family_name, input_path, text_sidecar_path),
-        **build_multilabel_metric_row(
+        **build_metric_row(
             family_name,
             stage_name,
             split_name,
@@ -1100,7 +1044,7 @@ def fit_multi_structured_family(train_df, eval_df, structured_feature_info, task
     eval_labels = parse_pipe_labels(eval_df[MULTI_TARGET_COL])
     check_unseen_multilabel_labels(train_labels, eval_labels, 'structured_carry_forward')
     _, y_train, y_eval = build_multilabel_encoded(train_labels, eval_labels)
-    result = fit_catboost_selection_with_fallback(
+    result = fit_catboost_selection_stage(
         train_df,
         eval_df,
         y_train,
@@ -1126,7 +1070,7 @@ def fit_multi_structured_holdout(dev_df, holdout_df, structured_feature_info, se
     holdout_labels = parse_pipe_labels(holdout_df[MULTI_TARGET_COL])
     check_unseen_multilabel_labels(dev_labels, holdout_labels, 'holdout_2026')
     mlb, y_dev, y_holdout = build_multilabel_encoded(dev_labels, holdout_labels)
-    result = fit_catboost_holdout_with_fallback(
+    result = fit_catboost_holdout_stage(
         dev_df,
         holdout_df,
         y_dev,

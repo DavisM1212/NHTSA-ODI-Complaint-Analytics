@@ -19,9 +19,8 @@ from threadpoolctl import threadpool_limits
 from src.config import settings
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_dataframe, write_json
-from src.modeling.common.core import (
+from src.modeling.common.helpers import (
     DATE_COL,
-    FEATURE_SET_DEFS,
     ID_COL,
     MAX_TOP_K,
     SINGLE_INPUT_STEM,
@@ -587,12 +586,14 @@ def main():
         prefer_parquet=args.output_format == 'parquet'
     )
 
-    split_df.to_csv(split_path, index=False)
-    metric_df.to_csv(metric_path, index=False)
-    class_df.to_csv(class_path, index=False)
-    importance_df.to_csv(importance_path, index=False)
-    calibration_df.to_csv(calib_path, index=False)
-    confusion_df.to_csv(confusion_path, index=False)
+    # Archived baseline CSV artifacts deleted per bloat reduction (Q2 decision)
+    # split_df.to_csv(split_path, index=False)
+    # metric_df.to_csv(metric_path, index=False)
+    # class_df.to_csv(class_path, index=False)
+    # importance_df.to_csv(importance_path, index=False)
+    # calibration_df.to_csv(calib_path, index=False)
+    # # calibration_df.to_csv(calib_path, index=False)
+    # confusion_df.to_csv(confusion_path, index=False)
     holdout_catboost['model'].save_model(model_path.as_posix())
 
     holdout_metric_row = metric_df.loc[

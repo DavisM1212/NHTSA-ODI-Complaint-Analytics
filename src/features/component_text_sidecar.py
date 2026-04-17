@@ -11,9 +11,10 @@ from src.config.contracts import (
     COMPONENT_TEXT_CONFLICT_NAME,
     COMPONENT_TEXT_OVERLAP_NAME,
     COMPONENT_TEXT_SIDECAR_STEM,
+    FEATURE_WAVE1_SPLIT_MODE,
+    get_split_policy,
 )
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
-from src.config.split_policy import FEATURE_WAVE1_SPLIT_MODE, get_split_policy
 from src.data.io_utils import load_frame, write_dataframe
 
 # -----------------------------------------------------------------------------
@@ -259,24 +260,24 @@ def main():
     odino_universe = base_df['odino'].dropna().astype(str).unique().tolist()
 
     sidecar_df, base_df = select_best_text_rows(clean_df, odino_universe)
-    conflict_df = build_conflict_report(base_df, sidecar_df)
-    overlap_df = build_overlap_report(sidecar_df)
+    # conflict_df = build_conflict_report(base_df, sidecar_df)
+    # overlap_df = build_overlap_report(sidecar_df)
 
     sidecar_path = write_dataframe(
         sidecar_df,
         PROCESSED_DATA_DIR / SIDECAR_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    conflict_path = OUTPUTS_DIR / CONFLICT_NAME
-    overlap_path = OUTPUTS_DIR / OVERLAP_NAME
-    conflict_df.to_csv(conflict_path, index=False)
-    overlap_df.to_csv(overlap_path, index=False)
+    # conflict_path = OUTPUTS_DIR / CONFLICT_NAME
+    # overlap_path = OUTPUTS_DIR / OVERLAP_NAME
+    # conflict_df.to_csv(conflict_path, index=False)
+    # overlap_df.to_csv(overlap_path, index=False)
 
     print(f'[input] cleaned={clean_path}')
     print(f'[input] base={base_path}')
     print(f'[write] {sidecar_path}')
-    print(f'[write] {conflict_path}')
-    print(f'[write] {overlap_path}')
+    # print(f'[write] {conflict_path}')
+    # print(f'[write] {overlap_path}')
     print('')
     print('[done] Component text sidecar finished')
     return 0

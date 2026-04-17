@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.config import settings
 from src.config.contracts import (
+    BENCHMARK_SPLIT_MODE,
     COMPONENT_CASE_BASE_STEM,
     COMPONENT_CONFLICT_NAME,
     COMPONENT_MULTILABEL_CASES_STEM,
@@ -14,10 +15,15 @@ from src.config.contracts import (
     COMPONENT_SUMMARY_NAME,
     COMPONENT_TARGET_GROUP_NAME,
     COMPONENT_TARGET_SCOPE_NAME,
+    get_split_policy,
 )
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
-from src.config.split_policy import BENCHMARK_SPLIT_MODE, get_split_policy
 from src.data.io_utils import write_dataframe
+from src.modeling.common.helpers import (
+    STATE_REGION_MAP,
+    VEHICLE_AGE_BUCKETS,
+    VEHICLE_AGE_LABELS,
+)
 from src.preprocessing.clean_complaints import add_safe_lag_fields, add_severity_flags
 
 # -----------------------------------------------------------------------------
@@ -37,72 +43,6 @@ TARGET_GROUP_NAME = COMPONENT_TARGET_GROUP_NAME
 # Collapse rules
 # -----------------------------------------------------------------------------
 SINGLE_LABEL_MIN_CASES = 250
-STATE_REGION_MAP = {
-    'CT': 'NORTHEAST',
-    'ME': 'NORTHEAST',
-    'MA': 'NORTHEAST',
-    'NH': 'NORTHEAST',
-    'RI': 'NORTHEAST',
-    'VT': 'NORTHEAST',
-    'NJ': 'NORTHEAST',
-    'NY': 'NORTHEAST',
-    'PA': 'NORTHEAST',
-    'IL': 'MIDWEST',
-    'IN': 'MIDWEST',
-    'MI': 'MIDWEST',
-    'OH': 'MIDWEST',
-    'WI': 'MIDWEST',
-    'IA': 'MIDWEST',
-    'KS': 'MIDWEST',
-    'MN': 'MIDWEST',
-    'MO': 'MIDWEST',
-    'NE': 'MIDWEST',
-    'ND': 'MIDWEST',
-    'SD': 'MIDWEST',
-    'DE': 'SOUTH',
-    'FL': 'SOUTH',
-    'GA': 'SOUTH',
-    'MD': 'SOUTH',
-    'NC': 'SOUTH',
-    'SC': 'SOUTH',
-    'VA': 'SOUTH',
-    'DC': 'SOUTH',
-    'WV': 'SOUTH',
-    'AL': 'SOUTH',
-    'KY': 'SOUTH',
-    'MS': 'SOUTH',
-    'TN': 'SOUTH',
-    'AR': 'SOUTH',
-    'LA': 'SOUTH',
-    'OK': 'SOUTH',
-    'TX': 'SOUTH',
-    'AZ': 'WEST',
-    'CO': 'WEST',
-    'ID': 'WEST',
-    'MT': 'WEST',
-    'NV': 'WEST',
-    'NM': 'WEST',
-    'UT': 'WEST',
-    'WY': 'WEST',
-    'AK': 'WEST',
-    'CA': 'WEST',
-    'HI': 'WEST',
-    'OR': 'WEST',
-    'WA': 'WEST',
-    'AS': 'TERRITORY',
-    'FM': 'TERRITORY',
-    'GU': 'TERRITORY',
-    'MH': 'TERRITORY',
-    'MP': 'TERRITORY',
-    'PR': 'TERRITORY',
-    'PW': 'TERRITORY',
-    'VI': 'TERRITORY',
-    'AA': 'MILITARY',
-    'AE': 'MILITARY',
-    'AP': 'MILITARY'
-}
-VEHICLE_AGE_BUCKETS = [-1, 0, 3, 7, 12, 200]
-VEHICLE_AGE_LABELS = ['AGE_0', 'AGE_1_3', 'AGE_4_7', 'AGE_8_12', 'AGE_13_PLUS']
 
 CASE_FIRST_COLS = [
     'source_era',
@@ -676,17 +616,17 @@ def main():
     component_df = load_component_rows(args.input_path)
     keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df = build_case_tables(component_df)
 
-    summary_df = build_summary(component_df, keep_df, base_case_df, single_case_df, single_case_bench_df, multi_case_df)
-    conflict_df = pd.concat(
-        [
-            build_conflict_summary(keep_df, 'all_kept_cases'),
-            build_conflict_summary(single_rows, 'single_label_cases'),
-            build_conflict_summary(multi_rows, 'multi_label_cases')
-        ],
-        ignore_index=True
-    )
-    target_scope_df = build_target_scope_summary(base_case_df, single_case_df, single_case_bench_df, multi_case_df)
-    target_group_df = build_target_group_summary(keep_df, single_case_df, single_case_bench_df, multi_rows)
+    # summary_df = build_summary(component_df, keep_df, base_case_df, single_case_df, single_case_bench_df, multi_case_df)
+    # conflict_df = pd.concat(
+    #     [
+    #         build_conflict_summary(keep_df, 'all_kept_cases'),
+    #         build_conflict_summary(single_rows, 'single_label_cases'),
+    #         build_conflict_summary(multi_rows, 'multi_label_cases')
+    #     ],
+    #     ignore_index=True
+    # )
+    # target_scope_df = build_target_scope_summary(base_case_df, single_case_df, single_case_bench_df, multi_case_df)
+    # target_group_df = build_target_group_summary(keep_df, single_case_df, single_case_bench_df, multi_rows)
 
     base_case_path = write_dataframe(
         base_case_df,
@@ -703,22 +643,22 @@ def main():
         PROCESSED_DATA_DIR / MULTI_CASE_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    summary_path = OUTPUTS_DIR / SUMMARY_NAME
-    conflict_path = OUTPUTS_DIR / CONFLICT_NAME
-    target_scope_path = OUTPUTS_DIR / TARGET_SCOPE_NAME
-    target_group_path = OUTPUTS_DIR / TARGET_GROUP_NAME
-    summary_df.to_csv(summary_path, index=False)
-    conflict_df.to_csv(conflict_path, index=False)
-    target_scope_df.to_csv(target_scope_path, index=False)
-    target_group_df.to_csv(target_group_path, index=False)
+    # summary_path = OUTPUTS_DIR / SUMMARY_NAME
+    # conflict_path = OUTPUTS_DIR / CONFLICT_NAME
+    # target_scope_path = OUTPUTS_DIR / TARGET_SCOPE_NAME
+    # target_group_path = OUTPUTS_DIR / TARGET_GROUP_NAME
+    # summary_df.to_csv(summary_path, index=False)
+    # conflict_df.to_csv(conflict_path, index=False)
+    # target_scope_df.to_csv(target_scope_path, index=False)
+    # target_group_df.to_csv(target_group_path, index=False)
 
     print(f'[write] {base_case_path}')
     print(f'[write] {single_case_path}')
     print(f'[write] {multi_case_path}')
-    print(f'[write] {summary_path}')
-    print(f'[write] {conflict_path}')
-    print(f'[write] {target_scope_path}')
-    print(f'[write] {target_group_path}')
+    # print(f'[write] {summary_path}')
+    # print(f'[write] {conflict_path}')
+    # print(f'[write] {target_scope_path}')
+    # print(f'[write] {target_group_path}')
     print('')
     print('[done] Component case collapse finished')
     return 0
