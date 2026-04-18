@@ -234,7 +234,7 @@ def parse_args():
     parser.add_argument('--single-manifest', default=None)
     parser.add_argument('--multi-manifest', default=None)
     parser.add_argument('--readme-path', default=None)
-    parser.add_argument('--summary', action='store_true')
+    parser.add_argument('--no-summary', action='store_true')
     return parser.parse_args()
 
 
@@ -244,7 +244,7 @@ def main():
         single_manifest_path=args.single_manifest,
         multi_manifest_path=args.multi_manifest,
         readme_path=args.readme_path,
-        write_summary=args.summary
+        write_summary=not args.no_summary
     )
     print(f'[write] {readme_path}')
     print('[done] README benchmark section refreshed')

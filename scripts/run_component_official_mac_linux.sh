@@ -38,10 +38,8 @@ if [[ "$SKIP_INGEST" != "1" ]]; then
 fi
 
 run_module src.preprocessing.clean_complaints
-run_module src.features.collapse_components
-run_module src.features.component_text_sidecar
-run_module src.modeling.official.component_single_text_calibrated --task-type "$TASK_TYPE" --devices "$DEVICES"
-run_module src.modeling.official.component_multi_routing --task-type "$TASK_TYPE" --devices "$DEVICES"
+run_module src.modeling.component_single_text_calibrated --task-type "$TASK_TYPE" --devices "$DEVICES"
+run_module src.modeling.component_multi_routing --task-type "$TASK_TYPE" --devices "$DEVICES"
 run_module src.reporting.update_component_readme
 
 if [[ "$SKIP_VISUALS" != "1" ]]; then

@@ -17,7 +17,6 @@ from src.config.contracts import (
     COMPONENT_SINGLE_OFFICIAL_CLASS,
     COMPONENT_SINGLE_OFFICIAL_CONFUSION,
     COMPONENT_SINGLE_OFFICIAL_MANIFEST,
-    COMPONENT_TARGET_SCOPE_NAME,
 )
 from src.config.paths import OUTPUTS_DIR, PROJECT_ROOT
 
@@ -31,7 +30,6 @@ SINGLE_CLASS_METRICS = COMPONENT_SINGLE_OFFICIAL_CLASS
 SINGLE_CONFUSION = COMPONENT_SINGLE_OFFICIAL_CONFUSION
 SINGLE_CALIBRATION = COMPONENT_SINGLE_OFFICIAL_CALIBRATION
 MULTI_LABEL_METRICS = COMPONENT_MULTI_OFFICIAL_LABELS
-TARGET_SCOPE_SUMMARY = COMPONENT_TARGET_SCOPE_NAME
 
 FIGURE_INDEX = 'component_model_figure_index.csv'
 
@@ -387,59 +385,6 @@ def plot_single_confusion(confusion_df, output_dir):
     )
 
 
-def plot_target_scope(scope_df, output_dir):
-    overall = scope_df.loc[scope_df['scope'].eq('overall')].copy()
-    keep_segments = [
-        'single_label_benchmark_cases',
-        'multi_label_only_cases'
-    ]
-    overall = overall.loc[overall['segment'].isin(keep_segments)]
-    labels = ['Single-label benchmark', 'Multi-label only']
-
-    fig, ax1 = plt.subplots(figsize=(9, 5))
-    bars = ax1.bar(
-        labels,
-        overall['cases'].astype(int),
-        color=[FIGURE_STYLE['single'], FIGURE_STYLE['multi']]
-    )
-    ax1.set_ylabel('Cases')
-    ax1.set_title('Component Target Scope And Excluded Multi-Label Cases', loc='left', fontsize=14, fontweight='bold')
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-
-    for bar, share in zip(bars, overall['case_share'].astype(float), strict=False):
-        ax1.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height(),
-            f'{int(bar.get_height()):,}\n{share:.1%}',
-            ha='center',
-            va='bottom',
-            fontsize=9
-        )
-
-    ax2 = ax1.twinx()
-    ax2.plot(
-        labels,
-        overall['severity_broad_rate'].astype(float),
-        color=FIGURE_STYLE['accent'],
-        marker='o',
-        linewidth=2,
-        label='Broad severity rate'
-    )
-    ax2.set_ylabel('Broad severity rate')
-    ax2.set_ylim(0, max(0.15, float(overall['severity_broad_rate'].max()) * 1.5))
-    ax2.spines['top'].set_visible(False)
-
-    fig.tight_layout()
-    return save_figure(
-        fig,
-        output_dir,
-        'component_target_scope',
-        'Component Target Scope And Excluded Multi-Label Cases',
-        'Single-label benchmark coverage versus multi-label-only cases and severity rate'
-    )
-
-
 # -----------------------------------------------------------------------------
 # Orchestration
 # -----------------------------------------------------------------------------
@@ -453,7 +398,6 @@ def generate_component_visuals(outputs_dir=OUTPUTS_DIR, output_dir=DEFAULT_FIGUR
     single_confusion_df = read_csv(outputs_dir, SINGLE_CONFUSION)
     single_calibration_df = read_csv(outputs_dir, SINGLE_CALIBRATION)
     multilabel_df = read_csv(outputs_dir, MULTI_LABEL_METRICS)
-    target_scope_df = read_csv(outputs_dir, TARGET_SCOPE_SUMMARY)
 
     rows = [
         plot_official_summary(summary_df, output_dir),
@@ -461,8 +405,7 @@ def generate_component_visuals(outputs_dir=OUTPUTS_DIR, output_dir=DEFAULT_FIGUR
         plot_single_class_f1(single_class_df, output_dir),
         plot_single_calibration(single_calibration_df, output_dir),
         plot_single_confusion(single_confusion_df, output_dir),
-        plot_multilabel_class_f1(multilabel_df, output_dir),
-        plot_target_scope(target_scope_df, output_dir)
+        plot_multilabel_class_f1(multilabel_df, output_dir)
     ]
     index_path = write_index(rows, output_dir)
     return {

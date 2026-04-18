@@ -1,5 +1,3 @@
-"""Small repo guardrails for raw data hashes and notebook hygiene"""
-
 import fnmatch
 import hashlib
 import json

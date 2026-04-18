@@ -1,5 +1,3 @@
-"""Git clean/smudge filter for exploration notebooks"""
-
 import argparse
 import json
 import sys

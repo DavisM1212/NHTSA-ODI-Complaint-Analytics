@@ -64,10 +64,8 @@ if (-not $SkipIngest) {
 }
 
 Invoke-Module "src.preprocessing.clean_complaints"
-Invoke-Module "src.features.collapse_components"
-Invoke-Module "src.features.component_text_sidecar"
-Invoke-Module "src.modeling.official.component_single_text_calibrated" @("--task-type", $TaskType, "--devices", $Devices)
-Invoke-Module "src.modeling.official.component_multi_routing" @("--task-type", $TaskType, "--devices", $Devices)
+Invoke-Module "src.modeling.component_single_text_calibrated" @("--task-type", $TaskType, "--devices", $Devices)
+Invoke-Module "src.modeling.component_multi_routing" @("--task-type", $TaskType, "--devices", $Devices)
 Invoke-Module "src.reporting.update_component_readme"
 
 if (-not $SkipVisuals) {

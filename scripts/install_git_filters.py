@@ -1,5 +1,3 @@
-"""Install local git filters used by this repo"""
-
 import subprocess
 import sys
 from pathlib import Path
