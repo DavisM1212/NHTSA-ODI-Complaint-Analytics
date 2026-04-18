@@ -13,11 +13,11 @@ from src.config.contracts import (
     COMPONENT_SINGLE_OFFICIAL_CONFUSION,
     COMPONENT_SINGLE_OFFICIAL_HOLDOUT,
     COMPONENT_SINGLE_OFFICIAL_MANIFEST,
+    COMPONENT_TEXT_SIDECAR_STEM,
     FEATURE_WAVE1_SPLIT_MODE,
 )
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
-from src.features.component_text_sidecar import SIDECAR_STEM
 from src.modeling.common.helpers import (
     SINGLE_INPUT_STEM,
     TARGET_COL,
@@ -44,9 +44,6 @@ from src.modeling.common.text_fusion import (
     log_line,
     merge_text_sidecar,
 )
-
-# Workflow owner for the official single-label component model
-# Fits the locked calibrated late-fusion model directly from the stable case table and text sidecar
 
 GLOBAL_MANIFEST_NAME = COMPONENT_SINGLE_OFFICIAL_MANIFEST
 SELECT_GRID_NAME = 'component_single_label_official_select_grid.csv'
@@ -236,7 +233,7 @@ def main():
     structured_feature_info = feature_manifest(STRUCTURED_FEATURE_SET)
 
     raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.single_input_path)
-    sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
+    sidecar_df, text_sidecar_path = load_frame(COMPONENT_TEXT_SIDECAR_STEM, input_path=args.text_sidecar_path)
     case_df = prep_single_label_cases(raw_df, structured_feature_info['feature_cols'])
     case_df = merge_text_sidecar(case_df, sidecar_df)
     split_parts = split_single_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)

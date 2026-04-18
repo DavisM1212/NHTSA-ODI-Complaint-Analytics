@@ -1,4 +1,5 @@
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -6,32 +7,52 @@ import pandas as pd
 
 from src.config import settings
 from src.config.contracts import (
+    BENCHMARK_SPLIT_MODE,
     CLEANED_COMPLAINTS_STEM,
-    CLEANING_AUDIT_STEM,
     CLEANING_DRIFT_NAME,
     CLEANING_SUMMARY_NAME,
     COMBINED_COMPLAINTS_STEM,
-    COMPONENT_ROWS_STEM,
+    COMPONENT_CONFLICT_NAME,
+    COMPONENT_MULTILABEL_CASES_STEM,
+    COMPONENT_SINGLE_LABEL_CASES_STEM,
+    COMPONENT_SUMMARY_NAME,
+    COMPONENT_TARGET_GROUP_NAME,
+    COMPONENT_TARGET_SCOPE_NAME,
+    COMPONENT_TEXT_CONFLICT_NAME,
+    COMPONENT_TEXT_OVERLAP_NAME,
+    COMPONENT_TEXT_SIDECAR_STEM,
+    FEATURE_WAVE1_SPLIT_MODE,
     REFERENCE_MODEL_YEAR_MAX,
     SEVERITY_CASES_STEM,
+    get_split_policy,
 )
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
-from src.data.io_utils import write_dataframe
+from src.data.io_utils import load_frame, write_dataframe
+from src.modeling.common.helpers import (
+    STATE_REGION_MAP,
+    VEHICLE_AGE_BUCKETS,
+    VEHICLE_AGE_LABELS,
+)
 
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
 INPUT_STEM = COMBINED_COMPLAINTS_STEM
 CLEAN_STEM = CLEANED_COMPLAINTS_STEM
-AUDIT_STEM = CLEANING_AUDIT_STEM
 SEVERITY_STEM = SEVERITY_CASES_STEM
-COMPONENT_STEM = COMPONENT_ROWS_STEM
-SUMMARY_NAME = CLEANING_SUMMARY_NAME
+SINGLE_CASE_STEM = COMPONENT_SINGLE_LABEL_CASES_STEM
+MULTI_CASE_STEM = COMPONENT_MULTILABEL_CASES_STEM
+SIDECAR_STEM = COMPONENT_TEXT_SIDECAR_STEM
 DRIFT_NAME = CLEANING_DRIFT_NAME
+CONFLICT_NAME = COMPONENT_CONFLICT_NAME
+TARGET_SCOPE_NAME = COMPONENT_TARGET_SCOPE_NAME
+TARGET_GROUP_NAME = COMPONENT_TARGET_GROUP_NAME
+TEXT_CONFLICT_NAME = COMPONENT_TEXT_CONFLICT_NAME
+OVERLAP_NAME = COMPONENT_TEXT_OVERLAP_NAME
 
 
 # -----------------------------------------------------------------------------
-# Domain constants
+# Cleaning constants
 # -----------------------------------------------------------------------------
 VEHICLE_TYPE = 'V'
 SCHEMA_CHANGE_DATE = pd.Timestamp('2021-05-17')
@@ -175,7 +196,7 @@ DRIFT_NUM_COLS = [
     'lag_days_safe'
 ]
 
-CASE_FIRST_COLS = [
+SEVERITY_FIRST_COLS = [
     'source_era',
     'source_zip',
     'source_file',
@@ -206,14 +227,21 @@ CASE_FIRST_COLS = [
     'repaired_yn'
 ]
 
-CASE_MAX_COLS = [
+SEVERITY_MAX_COLS = [
     'injured',
     'deaths',
     'miles',
     'veh_speed'
 ]
 
-CASE_ANY_FLAGS = [
+SEVERITY_YN_COLS = [
+    'fire',
+    'crash',
+    'medical_attn',
+    'vehicles_towed_yn'
+]
+
+SEVERITY_ANY_FLAGS = [
     'flag_prod_type_bad',
     'flag_year_unknown',
     'flag_year_out_of_range',
@@ -336,6 +364,137 @@ AUDIT_KEY_COLS = [
 
 
 # -----------------------------------------------------------------------------
+# Collapse rules
+# -----------------------------------------------------------------------------
+SINGLE_LABEL_MIN_CASES = 250
+
+COLLAPSE_FIRST_COLS = [
+    'source_era',
+    'source_zip',
+    'source_file',
+    'mfr_name',
+    'maketxt',
+    'modeltxt',
+    'yeartxt',
+    'state',
+    'ldate',
+    'faildate',
+    'cmpl_type',
+    'drive_train',
+    'fuel_sys',
+    'fuel_type',
+    'trans_type',
+    'num_cyls',
+    'police_rpt_yn',
+    'orig_owner_yn',
+    'anti_brakes_yn',
+    'cruise_cont_yn',
+    'repaired_yn'
+]
+
+COLLAPSE_MAX_COLS = [
+    'component_group_rows',
+    'injured',
+    'deaths',
+    'miles',
+    'veh_speed'
+]
+
+COLLAPSE_YN_COLS = [
+    'fire',
+    'crash',
+    'medical_attn',
+    'vehicles_towed_yn',
+    'police_rpt_yn',
+    'orig_owner_yn',
+    'anti_brakes_yn',
+    'cruise_cont_yn',
+    'repaired_yn'
+]
+
+COLLAPSE_ANY_FLAG_COLS = [
+    'flag_year_unknown',
+    'flag_year_out_of_range',
+    'flag_speed_999',
+    'flag_speed_high',
+    'flag_miles_high',
+    'flag_state_bad',
+    'flag_date_order_bad',
+    'flag_fail_pre_model',
+    'flag_fail_pre_model_far',
+    'miles_zero_flag',
+    'veh_speed_zero_flag'
+]
+
+BASE_CASE_COLS = [
+    'odino',
+    'source_era',
+    'source_zip',
+    'source_file',
+    'component_row_count',
+    'component_group_rows',
+    'mfr_name',
+    'maketxt',
+    'modeltxt',
+    'yeartxt',
+    'state',
+    'ldate',
+    'faildate',
+    'lag_days_safe',
+    'cmpl_type',
+    'drive_train',
+    'fuel_sys',
+    'fuel_type',
+    'trans_type',
+    'miles',
+    'veh_speed',
+    'injured',
+    'fire',
+    'crash',
+    'medical_attn',
+    'vehicles_towed_yn',
+    'police_rpt_yn',
+    'repaired_yn',
+    'miles_missing_flag',
+    'veh_speed_missing_flag',
+    'miles_zero_flag',
+    'veh_speed_zero_flag',
+    'faildate_trusted_flag',
+    'severity_primary_flag',
+    'severity_broad_flag'
+]
+
+SINGLE_CASE_COLS = BASE_CASE_COLS + [
+    'component_group',
+    'component_group_fit_case_count',
+    'single_label_keep_flag'
+]
+
+MULTI_CASE_COLS = BASE_CASE_COLS + [
+    'component_groups',
+    'component_group_count'
+]
+
+
+# -----------------------------------------------------------------------------
+# Text rules
+# -----------------------------------------------------------------------------
+SPACE_RE = re.compile(r'\s+')
+ALPHA_RE = re.compile(r'[A-Z]')
+PLACEHOLDER_TEXTS = {
+    'N/A',
+    'NA',
+    'NONE',
+    'NO DESCRIPTION',
+    'NO DESCRIPTION PROVIDED',
+    'UNKNOWN',
+    'UNK',
+    'TEST',
+    'TEST TEST'
+}
+
+
+# -----------------------------------------------------------------------------
 # Small helpers
 # -----------------------------------------------------------------------------
 def require_columns(df):
@@ -345,31 +504,8 @@ def require_columns(df):
         raise ValueError(f'Missing required complaint columns: {missing_text}')
 
 
-def resolve_input_path(input_path=None):
-    if input_path is not None:
-        path = Path(input_path)
-        if not path.exists():
-            raise FileNotFoundError(f'Input file not found: {path}')
-        return path
-
-    parquet_path = PROCESSED_DATA_DIR / f'{INPUT_STEM}.parquet'
-    if parquet_path.exists():
-        return parquet_path
-
-    csv_path = PROCESSED_DATA_DIR / f'{INPUT_STEM}.csv'
-    if csv_path.exists():
-        return csv_path
-
-    raise FileNotFoundError(
-        'No combined complaints file found under data/processed. Run the ODI ingest first'
-    )
-
-
-def load_complaints(input_path=None):
-    path = resolve_input_path(input_path)
-    if path.suffix.lower() == '.parquet':
-        return pd.read_parquet(path)
-    return pd.read_csv(path, dtype=str, low_memory=False)
+def filter_columns(col_list, df):
+    return [column for column in col_list if column in df.columns]
 
 
 def add_safe_lag_fields(df):
@@ -403,6 +539,17 @@ def add_severity_flags(df, primary_name, broad_name):
 
     df[primary_name] = primary
     df[broad_name] = broad
+    return df
+
+
+def reconstruct_yn_cols(df, yn_cols):
+    for column in yn_cols:
+        yes_col = f'__{column}_yes'
+        present_col = f'__{column}_present'
+        df[column] = pd.NA
+        df.loc[df[present_col], column] = 'N'
+        df.loc[df[yes_col], column] = 'Y'
+        df = df.drop(columns=[yes_col, present_col])
     return df
 
 
@@ -462,7 +609,7 @@ def select_clean_columns(work):
 
 
 def build_cleaning_audit(work):
-    keep_cols = [column for column in AUDIT_KEY_COLS + AUDIT_VALUE_COLS if column in work.columns]
+    keep_cols = filter_columns(AUDIT_KEY_COLS + AUDIT_VALUE_COLS, work)
     return work.loc[:, keep_cols].copy()
 
 
@@ -725,19 +872,19 @@ def build_severity_cases(cleaned_df, audit_df):
         grouped['compdesc'].nunique(dropna=True).rename('component_count')
     ]
 
-    first_cols = [column for column in CASE_FIRST_COLS if column in vehicle_df.columns]
+    first_cols = filter_columns(SEVERITY_FIRST_COLS, vehicle_df)
     if first_cols:
         frames.append(grouped[first_cols].first())
 
-    max_cols = [column for column in CASE_MAX_COLS if column in vehicle_df.columns]
+    max_cols = filter_columns(SEVERITY_MAX_COLS, vehicle_df)
     if max_cols:
         frames.append(grouped[max_cols].max())
 
-    any_flag_cols = [column for column in CASE_ANY_FLAGS if column in vehicle_df.columns]
+    any_flag_cols = filter_columns(SEVERITY_ANY_FLAGS, vehicle_df)
     if any_flag_cols:
         frames.append(grouped[any_flag_cols].any())
 
-    yn_cols = [column for column in ['fire', 'crash', 'medical_attn', 'vehicles_towed_yn'] if column in vehicle_df.columns]
+    yn_cols = [column for column in SEVERITY_YN_COLS if column in vehicle_df.columns]
     temp_cols = []
     for column in yn_cols:
         yes_col = f'__{column}_yes'
@@ -750,15 +897,7 @@ def build_severity_cases(cleaned_df, audit_df):
         frames.append(vehicle_df.groupby('odino', sort=True)[temp_cols].max())
 
     case_df = pd.concat(frames, axis=1).reset_index()
-
-    for column in yn_cols:
-        yes_col = f'__{column}_yes'
-        present_col = f'__{column}_present'
-        case_df[column] = pd.NA
-        case_df.loc[case_df[present_col], column] = 'N'
-        case_df.loc[case_df[yes_col], column] = 'Y'
-        case_df = case_df.drop(columns=[yes_col, present_col])
-
+    case_df = reconstruct_yn_cols(case_df, yn_cols)
     case_df['miles_missing_flag'] = case_df['miles'].isna()
     case_df['veh_speed_missing_flag'] = case_df['veh_speed'].isna()
     case_df = add_safe_lag_fields(case_df)
@@ -814,6 +953,297 @@ def build_component_rows(cleaned_df, audit_df):
 
     keep_cols = [column for column in COMPONENT_COLS if column in component_df.columns]
     return component_df.loc[:, keep_cols].reset_index(drop=True)
+
+
+# -----------------------------------------------------------------------------
+# Collapse helpers
+# -----------------------------------------------------------------------------
+def collapse_case_features(case_rows, target_mode):
+    case_rows = case_rows.sort_values(['odino', 'cmplid'], na_position='last').copy()
+    grouped = case_rows.groupby('odino', sort=True)
+
+    frames = [grouped.size().rename('component_row_count')]
+    if target_mode == 'single':
+        frames.append(grouped['component_group'].first())
+    elif target_mode == 'multi':
+        frames.append(
+            grouped['component_group']
+            .agg(lambda s: '|'.join(sorted(pd.Series(s.dropna().astype(str).unique()).tolist())))
+            .rename('component_groups')
+        )
+        frames.append(grouped['component_group'].nunique(dropna=True).rename('component_group_count'))
+    elif target_mode != 'base':
+        raise ValueError(f'Unknown target_mode: {target_mode}')
+
+    first_cols = filter_columns(COLLAPSE_FIRST_COLS, case_rows)
+    if first_cols:
+        frames.append(grouped[first_cols].first())
+
+    max_cols = filter_columns(COLLAPSE_MAX_COLS, case_rows)
+    if max_cols:
+        frames.append(grouped[max_cols].max())
+
+    any_flag_cols = filter_columns(COLLAPSE_ANY_FLAG_COLS, case_rows)
+    if any_flag_cols:
+        frames.append(grouped[any_flag_cols].any())
+
+    yn_cols = [column for column in COLLAPSE_YN_COLS if column in case_rows.columns]
+    temp_cols = []
+    for column in yn_cols:
+        yes_col = f'__{column}_yes'
+        present_col = f'__{column}_present'
+        case_rows[yes_col] = case_rows[column].fillna('N').eq('Y')
+        case_rows[present_col] = case_rows[column].notna()
+        temp_cols.extend([yes_col, present_col])
+
+    if temp_cols:
+        frames.append(case_rows.groupby('odino', sort=True)[temp_cols].max())
+
+    case_df = pd.concat(frames, axis=1).reset_index()
+    case_df = reconstruct_yn_cols(case_df, yn_cols)
+    case_df['miles_missing_flag'] = case_df['miles'].isna()
+    case_df['veh_speed_missing_flag'] = case_df['veh_speed'].isna()
+    case_df = add_safe_lag_fields(case_df)
+    return add_severity_flags(
+        case_df,
+        primary_name='severity_primary_flag',
+        broad_name='severity_broad_flag'
+    )
+
+
+def build_sort_keys(case_df):
+    work = case_df.copy()
+    work['__odino_num'] = pd.to_numeric(work['odino'], errors='coerce')
+    return work.sort_values(
+        ['ldate', '__odino_num', 'odino'],
+        na_position='last'
+    ).reset_index(drop=True)
+
+
+def add_vehicle_age_fields(case_df):
+    case_df = case_df.copy()
+    case_df['complaint_year'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.year.astype('Int64')
+    case_df['complaint_month'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.month.astype('Int64')
+    case_df['complaint_quarter'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.quarter.astype('Int64')
+
+    model_year = pd.to_numeric(case_df['yeartxt'], errors='coerce')
+    vehicle_age = case_df['complaint_year'].astype('Float64') - model_year.astype('Float64')
+    vehicle_age = vehicle_age.where(vehicle_age.ge(0))
+    case_df['vehicle_age_years'] = vehicle_age
+    age_bucket = pd.cut(
+        vehicle_age,
+        bins=VEHICLE_AGE_BUCKETS,
+        labels=VEHICLE_AGE_LABELS,
+        include_lowest=True
+    )
+    case_df['vehicle_age_bucket'] = age_bucket.astype('string')
+    return case_df
+
+
+def add_state_region(case_df):
+    case_df = case_df.copy()
+    state = case_df['state'].astype('string').str.upper()
+    case_df['state_region'] = state.map(STATE_REGION_MAP).fillna('UNKNOWN').astype(str)
+    return case_df
+
+
+def add_prior_history_features(case_df):
+    work = build_sort_keys(case_df)
+    work['__event_day'] = pd.to_datetime(work['ldate'], errors='coerce').dt.normalize()
+    work['__severity_int'] = work['severity_broad_flag'].fillna(False).astype(int)
+
+    history_specs = [
+        ('mfr_name', 'prior_cmpl_mfr_all', 'prior_severity_share_mfr_all'),
+        (['maketxt', 'modeltxt'], 'prior_cmpl_make_model_all', 'prior_severity_share_make_model_all'),
+        (
+            ['maketxt', 'modeltxt', 'yeartxt'],
+            'prior_cmpl_make_model_year_all',
+            'prior_severity_share_make_model_year_all'
+        )
+    ]
+
+    for key_cols, count_name, share_name in history_specs:
+        key_cols = [key_cols] if isinstance(key_cols, str) else list(key_cols)
+        daily_df = (
+            work.groupby(key_cols + ['__event_day'], dropna=False, sort=False)
+            .agg(
+                day_case_count=('odino', 'size'),
+                day_severity_count=('__severity_int', 'sum')
+            )
+            .reset_index()
+        )
+        grouped = daily_df.groupby(key_cols, sort=False, dropna=False)
+        daily_df['__prior_case_count'] = grouped['day_case_count'].cumsum() - daily_df['day_case_count']
+        daily_df['__prior_severity_count'] = grouped['day_severity_count'].cumsum() - daily_df['day_severity_count']
+        daily_df[count_name] = daily_df['__prior_case_count'].astype('Int64')
+        prior_share = daily_df['__prior_severity_count'].astype(float) / daily_df['__prior_case_count'].replace(0, pd.NA)
+        daily_df[share_name] = pd.Series(prior_share, index=daily_df.index).astype('Float64')
+        work = work.merge(
+            daily_df[key_cols + ['__event_day', count_name, share_name]],
+            on=key_cols + ['__event_day'],
+            how='left',
+            validate='many_to_one'
+        )
+
+    return work.drop(columns=['__odino_num', '__event_day', '__severity_int'])
+
+
+def add_wave1_case_features(case_df):
+    case_df = add_vehicle_age_fields(case_df)
+    case_df = add_state_region(case_df)
+    return add_prior_history_features(case_df)
+
+
+def build_case_tables(component_df):
+    keep_df = component_df.loc[
+        component_df['component_keep_flag'].fillna(False) & component_df['odino'].notna()
+    ].copy()
+    if keep_df.empty:
+        raise ValueError('No kept component rows found for case collapse')
+
+    group_counts = keep_df.groupby('odino')['component_group'].nunique()
+    single_ids = group_counts.loc[group_counts.eq(1)].index
+    multi_ids = group_counts.loc[group_counts.gt(1)].index
+
+    single_rows = keep_df.loc[keep_df['odino'].isin(single_ids)].copy()
+    multi_rows = keep_df.loc[keep_df['odino'].isin(multi_ids)].copy()
+
+    if single_rows.empty:
+        raise ValueError('No single-label component cases found after filtering')
+
+    base_case_df = collapse_case_features(keep_df, target_mode='base')
+    base_keep_cols = filter_columns(BASE_CASE_COLS, base_case_df)
+    base_case_df = base_case_df.loc[:, base_keep_cols].sort_values('odino').reset_index(drop=True)
+
+    single_target_df = collapse_case_features(single_rows, target_mode='single')[['odino', 'component_group']]
+    single_case_df = base_case_df.loc[base_case_df['odino'].isin(single_ids)].merge(
+        single_target_df,
+        on='odino',
+        how='left',
+        validate='one_to_one'
+    )
+    benchmark_policy = get_split_policy(BENCHMARK_SPLIT_MODE)
+    fit_window_mask = pd.to_datetime(single_case_df['ldate'], errors='coerce').le(benchmark_policy['valid_end'])
+    fit_counts = single_case_df.loc[fit_window_mask, 'component_group'].value_counts()
+    single_case_df['component_group_fit_case_count'] = (
+        single_case_df['component_group']
+        .map(fit_counts)
+        .astype('Int64')
+    )
+    single_case_df['single_label_keep_flag'] = (
+        single_case_df['component_group_fit_case_count']
+        .fillna(0)
+        .ge(SINGLE_LABEL_MIN_CASES)
+    )
+    single_case_bench_df = single_case_df.loc[single_case_df['single_label_keep_flag']].copy()
+    single_keep_cols = filter_columns(SINGLE_CASE_COLS, single_case_df)
+    single_case_df = single_case_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
+    single_case_bench_df = single_case_bench_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
+
+    multi_target_df = collapse_case_features(keep_df, target_mode='multi')[['odino', 'component_groups', 'component_group_count']]
+    multi_case_df = base_case_df.merge(
+        multi_target_df,
+        on='odino',
+        how='left',
+        validate='one_to_one'
+    )
+    multi_keep_cols = filter_columns(MULTI_CASE_COLS, multi_case_df)
+    multi_case_df = multi_case_df.loc[:, multi_keep_cols].sort_values('odino').reset_index(drop=True)
+
+    return keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df
+
+
+# -----------------------------------------------------------------------------
+# Small helpers
+# -----------------------------------------------------------------------------
+def normalize_text(value):
+    if pd.isna(value):
+        return ''
+    return SPACE_RE.sub(' ', str(value).strip())
+
+
+def is_placeholder_text(text):
+    text = normalize_text(text)
+    if not text:
+        return False
+
+    upper = text.upper()
+    if upper in PLACEHOLDER_TEXTS:
+        return True
+
+    return len(text) <= 10 and not bool(ALPHA_RE.search(upper))
+
+
+def build_base_text_rows(clean_df, odino_universe):
+    work = clean_df.loc[
+        clean_df['odino'].isin(odino_universe),
+        ['odino', 'cmplid', 'cdescr', 'source_era', 'ldate']
+    ].copy()
+    work['ldate'] = pd.to_datetime(work['ldate'], errors='coerce')
+    work['cmplid_num'] = pd.to_numeric(work['cmplid'], errors='coerce')
+    work['cdescr_norm'] = work['cdescr'].map(normalize_text)
+    work['cdescr_len'] = work['cdescr_norm'].str.len()
+    work['has_text'] = work['cdescr_norm'].ne('')
+    return work
+
+
+def select_best_text_rows(clean_df, odino_universe):
+    base_df = build_base_text_rows(clean_df, odino_universe)
+    universe_df = pd.DataFrame({'odino': sorted(pd.Series(odino_universe, dtype='string').dropna().astype(str).unique())})
+
+    fallback_df = (
+        base_df
+        .sort_values(['odino', 'ldate', 'cmplid_num'], ascending=[True, True, True], na_position='last')
+        .groupby('odino', as_index=False)
+        .first()
+    )
+    nonblank_df = (
+        base_df.loc[base_df['has_text']].copy()
+        .sort_values(
+            ['odino', 'cdescr_len', 'ldate', 'cmplid_num'],
+            ascending=[True, False, True, True],
+            na_position='last'
+        )
+        .groupby('odino', as_index=False)
+        .first()
+    )
+
+    chosen_df = universe_df.merge(fallback_df, on='odino', how='left', suffixes=('', '_fallback'))
+    chosen_nonblank_df = nonblank_df.set_index('odino')
+    fallback_lookup = fallback_df.set_index('odino')
+
+    for column in ['cmplid', 'cmplid_num', 'cdescr', 'source_era', 'ldate', 'cdescr_norm', 'cdescr_len', 'has_text']:
+        chosen_df[column] = chosen_df['odino'].map(chosen_nonblank_df[column]) if column in chosen_nonblank_df.columns else pd.NA
+        if column in fallback_lookup.columns:
+            chosen_df[column] = chosen_df[column].where(chosen_df[column].notna(), chosen_df['odino'].map(fallback_lookup[column]))
+
+    chosen_df['cdescr'] = chosen_df['cdescr'].astype('string')
+    chosen_df['cdescr_norm'] = chosen_df['cdescr_norm'].fillna('')
+    chosen_df['cdescr_missing_flag'] = chosen_df['cdescr_norm'].eq('')
+    chosen_df['cdescr_placeholder_flag'] = chosen_df['cdescr_norm'].map(is_placeholder_text)
+    chosen_df.loc[chosen_df['cdescr_missing_flag'], 'cdescr_placeholder_flag'] = False
+    chosen_df['cdescr_model_text'] = chosen_df['cdescr_norm']
+    chosen_df.loc[chosen_df['cdescr_placeholder_flag'], 'cdescr_model_text'] = ''
+    chosen_df['cdescr_char_len'] = chosen_df['cdescr_model_text'].str.len().astype('Int64')
+    chosen_df['cdescr_word_count'] = (
+        chosen_df['cdescr_model_text']
+        .str.split()
+        .map(lambda parts: len(parts) if isinstance(parts, list) else 0)
+        .astype('Int64')
+    )
+
+    keep_cols = [
+        'odino',
+        'cdescr',
+        'cdescr_model_text',
+        'cdescr_missing_flag',
+        'cdescr_placeholder_flag',
+        'cdescr_char_len',
+        'cdescr_word_count',
+        'source_era',
+        'ldate'
+    ]
+    return chosen_df.loc[:, keep_cols].sort_values('odino').reset_index(drop=True), base_df
 
 
 # -----------------------------------------------------------------------------
@@ -910,6 +1340,288 @@ def build_summary(cleaned_df, audit_df, severity_df, component_df):
 
     return pd.DataFrame(summary_rows)
 
+def build_conflict_summary(case_rows, scope_name):
+    if case_rows.empty:
+        return pd.DataFrame(columns=['scope', 'column', 'conflict_cases', 'conflict_rate_pct'])
+
+    conflict_cols = [
+        column
+        for column in COLLAPSE_FIRST_COLS + COLLAPSE_MAX_COLS + COLLAPSE_YN_COLS
+        if column in case_rows.columns
+    ]
+    distinct = case_rows.groupby('odino', sort=True)[conflict_cols].nunique(dropna=True)
+    conflict_df = distinct.gt(1).sum().reset_index(name='conflict_cases')
+    conflict_df = conflict_df.rename(columns={'index': 'column'})
+    conflict_df['scope'] = scope_name
+    conflict_df['conflict_rate_pct'] = (
+        conflict_df['conflict_cases'] / max(case_rows['odino'].nunique(), 1) * 100
+    ).round(4)
+    return conflict_df[['scope', 'column', 'conflict_cases', 'conflict_rate_pct']].sort_values(
+        ['conflict_cases', 'column'],
+        ascending=[False, True]
+    ).reset_index(drop=True)
+
+
+def build_collapse_summary(component_df, keep_df, base_case_df, single_case_df, single_case_bench_df, multi_case_df):
+    all_cases = int(component_df['odino'].nunique())
+    kept_cases = int(keep_df['odino'].nunique())
+    base_cases = int(base_case_df['odino'].nunique())
+    single_cases = int(single_case_df['odino'].nunique())
+    benchmark_cases = int(single_case_bench_df['odino'].nunique())
+    multi_benchmark_cases = int(multi_case_df['odino'].nunique())
+    multi_only_cases = kept_cases - single_cases
+    rare_single_cases = single_cases - benchmark_cases
+
+    summary_rows = [
+        {
+            'metric': 'component_rows_in',
+            'value': int(len(component_df))
+        },
+        {
+            'metric': 'kept_component_rows',
+            'value': int(len(keep_df))
+        },
+        {
+            'metric': 'all_component_cases',
+            'value': all_cases
+        },
+        {
+            'metric': 'kept_component_cases',
+            'value': kept_cases
+        },
+        {
+            'metric': 'component_case_base_cases',
+            'value': base_cases
+        },
+        {
+            'metric': 'single_label_cases_all',
+            'value': single_cases
+        },
+        {
+            'metric': 'single_label_benchmark_cases',
+            'value': benchmark_cases
+        },
+        {
+            'metric': 'single_label_rare_group_cases_dropped',
+            'value': rare_single_cases
+        },
+        {
+            'metric': 'multi_label_benchmark_cases',
+            'value': multi_benchmark_cases
+        },
+        {
+            'metric': 'multi_label_only_cases',
+            'value': multi_only_cases
+        },
+        {
+            'metric': 'single_label_case_share_pct',
+            'value': round(single_cases / max(kept_cases, 1) * 100, 2)
+        },
+        {
+            'metric': 'single_label_benchmark_share_pct',
+            'value': round(benchmark_cases / max(kept_cases, 1) * 100, 2)
+        },
+        {
+            'metric': 'multi_label_case_share_pct',
+            'value': round(multi_only_cases / max(kept_cases, 1) * 100, 2)
+        },
+        {
+            'metric': 'component_model_groups',
+            'value': int(single_case_bench_df['component_group'].nunique())
+        }
+    ]
+    return pd.DataFrame(summary_rows)
+
+
+def build_target_scope_summary(base_case_df, single_case_df, single_case_bench_df, multi_case_df):
+    rows = []
+    kept_case_base = base_case_df[['odino', 'ldate', 'severity_broad_flag']].copy()
+    multi_only_df = multi_case_df.loc[multi_case_df['component_group_count'].gt(1)].copy()
+    scope_frames = {
+        'kept_component_cases': kept_case_base,
+        'multi_label_benchmark_cases': multi_case_df,
+        'single_label_cases_all': single_case_df,
+        'single_label_benchmark_cases': single_case_bench_df,
+        'multi_label_only_cases': multi_only_df
+    }
+
+    for scope_name, frame in scope_frames.items():
+        if frame.empty:
+            continue
+        rows.append(
+            {
+                'scope': 'overall',
+                'segment': scope_name,
+                'cases': int(len(frame)),
+                'case_share': round(float(len(frame) / max(len(scope_frames['kept_component_cases']), 1)), 4),
+                'severity_broad_rate': round(float(frame['severity_broad_flag'].mean()), 4)
+                if 'severity_broad_flag' in frame.columns
+                else pd.NA
+            }
+        )
+
+    keep_years = scope_frames['kept_component_cases'][['odino', 'ldate', 'severity_broad_flag']].copy()
+    keep_years['year'] = pd.to_datetime(keep_years['ldate']).dt.year.astype('Int64')
+    single_years = single_case_df[['odino', 'ldate', 'severity_broad_flag']].copy()
+    single_years['year'] = pd.to_datetime(single_years['ldate']).dt.year.astype('Int64')
+    multi_years = multi_only_df[['odino', 'ldate', 'severity_broad_flag']].copy()
+    multi_years['year'] = pd.to_datetime(multi_years['ldate']).dt.year.astype('Int64')
+
+    for year_value in sorted(keep_years['year'].dropna().unique().tolist()):
+        keep_count = int(keep_years.loc[keep_years['year'].eq(year_value), 'odino'].nunique())
+        if keep_count == 0:
+            continue
+        single_slice = single_years.loc[single_years['year'].eq(year_value)]
+        multi_slice = multi_years.loc[multi_years['year'].eq(year_value)]
+        rows.extend(
+            [
+                {
+                    'scope': 'by_year',
+                    'segment': f'single_label_share_{year_value}',
+                    'cases': int(len(single_slice)),
+                    'case_share': round(float(len(single_slice) / keep_count), 4),
+                    'severity_broad_rate': round(float(single_slice['severity_broad_flag'].mean()), 4)
+                    if not single_slice.empty
+                    else pd.NA
+                },
+                {
+                    'scope': 'by_year',
+                    'segment': f'multi_label_only_share_{year_value}',
+                    'cases': int(len(multi_slice)),
+                    'case_share': round(float(len(multi_slice) / keep_count), 4),
+                    'severity_broad_rate': round(float(multi_slice['severity_broad_flag'].mean()), 4)
+                    if not multi_slice.empty
+                    else pd.NA
+                }
+            ]
+        )
+
+    return pd.DataFrame(rows)
+
+
+def build_target_group_summary(keep_df, single_case_df, single_case_bench_df, multi_rows):
+    kept_presence = (
+        keep_df[['odino', 'component_group']]
+        .drop_duplicates()
+        ['component_group']
+        .value_counts()
+    )
+    multi_presence = (
+        multi_rows[['odino', 'component_group']]
+        .drop_duplicates()
+        ['component_group']
+        .value_counts()
+    ) if not multi_rows.empty else pd.Series(dtype='int64')
+    single_presence = single_case_df['component_group'].value_counts()
+    benchmark_presence = single_case_bench_df['component_group'].value_counts()
+    rows = []
+    all_groups = sorted(kept_presence.index.tolist())
+    for group_name in all_groups:
+        kept_count = int(kept_presence.get(group_name, 0))
+        single_count = int(single_presence.get(group_name, 0))
+        benchmark_count = int(benchmark_presence.get(group_name, 0))
+        multi_count = int(multi_presence.get(group_name, 0))
+        rows.append(
+            {
+                'component_group': group_name,
+                'kept_case_presence': kept_count,
+                'single_label_case_presence': single_count,
+                'single_label_benchmark_case_presence': benchmark_count,
+                'multi_label_case_presence': multi_count,
+                'multi_label_presence_share': round(multi_count / max(kept_count, 1), 4),
+                'single_label_presence_share': round(single_count / max(kept_count, 1), 4),
+                'single_label_benchmark_presence_share': round(benchmark_count / max(kept_count, 1), 4)
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values('kept_case_presence', ascending=False).reset_index(drop=True)
+
+def build_conflict_report(base_df, sidecar_df):
+    nonblank_df = base_df.loc[base_df['has_text']].copy()
+    if nonblank_df.empty:
+        return pd.DataFrame(
+            columns=[
+                'odino',
+                'candidate_rows',
+                'distinct_nonblank_texts',
+                'chosen_char_len',
+                'earliest_ldate',
+                'latest_ldate',
+                'chosen_cdescr'
+            ]
+        )
+
+    conflict_df = (
+        nonblank_df.groupby('odino', as_index=False)
+        .agg(
+            candidate_rows=('odino', 'size'),
+            distinct_nonblank_texts=('cdescr_norm', 'nunique'),
+            earliest_ldate=('ldate', 'min'),
+            latest_ldate=('ldate', 'max')
+        )
+    )
+    conflict_df = conflict_df.loc[conflict_df['distinct_nonblank_texts'].gt(1)].copy()
+    if conflict_df.empty:
+        return pd.DataFrame(columns=[
+            'odino',
+            'candidate_rows',
+            'distinct_nonblank_texts',
+            'chosen_char_len',
+            'earliest_ldate',
+            'latest_ldate',
+            'chosen_cdescr'
+        ])
+
+    chosen_df = sidecar_df[['odino', 'cdescr_model_text']].copy()
+    chosen_df = chosen_df.rename(columns={'cdescr_model_text': 'chosen_cdescr'})
+    chosen_df['chosen_char_len'] = chosen_df['chosen_cdescr'].str.len().astype('Int64')
+    conflict_df = conflict_df.merge(chosen_df, on='odino', how='left', validate='one_to_one')
+    return conflict_df.sort_values(['distinct_nonblank_texts', 'candidate_rows', 'odino'], ascending=[False, False, True]).reset_index(drop=True)
+
+
+def build_overlap_row(prior_name, later_name, prior_df, later_df):
+    prior_text = prior_df.loc[prior_df['cdescr_model_text'].ne(''), 'cdescr_model_text']
+    later_text = later_df.loc[later_df['cdescr_model_text'].ne(''), 'cdescr_model_text']
+    prior_set = set(prior_text.tolist())
+    later_overlap_mask = later_text.isin(prior_set)
+    later_unique = later_text.nunique()
+    overlap_unique = later_text.loc[later_overlap_mask].nunique()
+
+    return {
+        'prior_split': prior_name,
+        'later_split': later_name,
+        'prior_rows': int(len(prior_df)),
+        'later_rows': int(len(later_df)),
+        'prior_nonempty_rows': int(prior_text.shape[0]),
+        'later_nonempty_rows': int(later_text.shape[0]),
+        'prior_unique_texts': int(len(prior_set)),
+        'later_unique_texts': int(later_unique),
+        'overlap_unique_texts': int(overlap_unique),
+        'overlap_unique_pct': round(float(overlap_unique / max(later_unique, 1) * 100), 4),
+        'overlap_rows': int(later_overlap_mask.sum()),
+        'overlap_row_pct': round(float(later_overlap_mask.mean() * 100), 4) if len(later_overlap_mask) else 0.0
+    }
+
+
+def build_overlap_report(sidecar_df):
+    policy = get_split_policy(FEATURE_WAVE1_SPLIT_MODE)
+    work = sidecar_df.copy()
+    work['ldate'] = pd.to_datetime(work['ldate'], errors='coerce')
+
+    train_df = work.loc[work['ldate'] <= policy['train_core_end']].copy()
+    screen_df = work.loc[(work['ldate'] > policy['train_core_end']) & (work['ldate'] <= policy['screen_end'])].copy()
+    select_df = work.loc[(work['ldate'] > policy['screen_end']) & (work['ldate'] <= policy['select_end'])].copy()
+    holdout_df = work.loc[work['ldate'] > policy['select_end']].copy()
+    dev_screen_df = pd.concat([train_df, screen_df], ignore_index=True)
+    dev_select_df = pd.concat([dev_screen_df, select_df], ignore_index=True)
+
+    rows = [
+        build_overlap_row('train_core', 'screen_2024', train_df, screen_df),
+        build_overlap_row('dev_2020_2024', 'select_2025', dev_screen_df, select_df),
+        build_overlap_row('dev_2020_2025', 'holdout_2026', dev_select_df, holdout_df)
+    ]
+    return pd.DataFrame(rows)
+
 
 # -----------------------------------------------------------------------------
 # CLI
@@ -929,6 +1641,11 @@ def parse_args():
         default=settings.OUTPUT_FORMAT if settings.OUTPUT_FORMAT in {'parquet', 'csv'} else 'parquet',
         help='Preferred output format for cleaned tables'
     )
+    parser.add_argument(
+        '--summary',
+        action='store_true',
+        help='Whether to build and output summary tables for cleaning and case collapse steps'
+    )
     return parser.parse_args()
 
 
@@ -936,48 +1653,106 @@ def main():
     args = parse_args()
     ensure_project_directories()
 
-    raw_df = load_complaints(args.input_path)
+    raw_df, _ = load_frame(INPUT_STEM, args.input_path)
     work_df = build_cleaning_work(raw_df)
     cleaned_df = select_clean_columns(work_df)
     audit_df = build_cleaning_audit(work_df)
     severity_df = build_severity_cases(cleaned_df, audit_df)
     component_df = build_component_rows(cleaned_df, audit_df)
-    # summary_df = build_summary(cleaned_df, audit_df, severity_df, component_df)
-    # drift_df = build_source_era_drift(audit_df)
 
     clean_path = write_dataframe(
         cleaned_df,
         PROCESSED_DATA_DIR / CLEAN_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    # audit_path = write_dataframe(
-    #     audit_df,
-    #     PROCESSED_DATA_DIR / AUDIT_STEM,
-    #     prefer_parquet=args.output_format == 'parquet'
-    # )
     severity_path = write_dataframe(
         severity_df,
         PROCESSED_DATA_DIR / SEVERITY_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    component_path = write_dataframe(
-        component_df,
-        PROCESSED_DATA_DIR / COMPONENT_STEM,
+
+    if args.summary:
+        cleaning_summary_df = build_summary(cleaned_df, audit_df, severity_df, component_df)
+        drift_df = build_source_era_drift(audit_df)
+        cleaning_summary_path = OUTPUTS_DIR / CLEANING_SUMMARY_NAME
+        drift_path = OUTPUTS_DIR / DRIFT_NAME
+        cleaning_summary_df.to_csv(cleaning_summary_path, index=False)
+        drift_df.to_csv(drift_path, index=False)
+        print(f"[write] {cleaning_summary_path}")
+        print(f'[write] {drift_path}')
+
+    print(f"[write] {clean_path}")
+    print(f"[write] {severity_path}")
+    print("")
+    print("[done 1/3] Complaint preprocessing finished")
+
+    keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df = build_case_tables(component_df)
+
+    single_case_path = write_dataframe(
+        single_case_df,
+        PROCESSED_DATA_DIR / SINGLE_CASE_STEM,
         prefer_parquet=args.output_format == 'parquet'
     )
-    # summary_path = OUTPUTS_DIR / SUMMARY_NAME
-    # drift_path = OUTPUTS_DIR / DRIFT_NAME
-    # summary_df.to_csv(summary_path, index=False)
-    # drift_df.to_csv(drift_path, index=False)
+    multi_case_path = write_dataframe(
+        multi_case_df,
+        PROCESSED_DATA_DIR / MULTI_CASE_STEM,
+        prefer_parquet=args.output_format == 'parquet'
+    )
 
-    print(f'[write] {clean_path}')
-    # print(f'[write] {audit_path}')
-    print(f'[write] {severity_path}')
-    print(f'[write] {component_path}')
-    # print(f'[write] {summary_path}')
-    # print(f'[write] {drift_path}')
-    print('')
-    print('[done] Complaint preprocessing finished')
+    if args.summary:
+        component_summary_df = build_collapse_summary(component_df, keep_df, base_case_df, single_case_df, single_case_bench_df, multi_case_df)
+        conflict_df = pd.concat(
+            [
+                build_conflict_summary(keep_df, 'all_kept_cases'),
+                build_conflict_summary(single_rows, 'single_label_cases'),
+                build_conflict_summary(multi_rows, 'multi_label_cases')
+            ],
+            ignore_index=True
+        )
+        target_scope_df = build_target_scope_summary(base_case_df, single_case_df, single_case_bench_df, multi_case_df)
+        target_group_df = build_target_group_summary(keep_df, single_case_df, single_case_bench_df, multi_rows)
+        component_summary_path = OUTPUTS_DIR / COMPONENT_SUMMARY_NAME
+        conflict_path = OUTPUTS_DIR / CONFLICT_NAME
+        target_scope_path = OUTPUTS_DIR / TARGET_SCOPE_NAME
+        target_group_path = OUTPUTS_DIR / TARGET_GROUP_NAME
+        component_summary_df.to_csv(component_summary_path, index=False)
+        conflict_df.to_csv(conflict_path, index=False)
+        target_scope_df.to_csv(target_scope_path, index=False)
+        target_group_df.to_csv(target_group_path, index=False)
+
+        print(f"[write] {component_summary_path}")
+        print(f"[write] {conflict_path}")
+        print(f"[write] {target_scope_path}")
+        print(f"[write] {target_group_path}")
+
+    print(f"[write] {single_case_path}")
+    print(f"[write] {multi_case_path}")
+    print("")
+    print("[done 2/3] Component case collapse finished")
+
+    odino_universe = base_case_df['odino'].dropna().astype(str).unique().tolist()
+    sidecar_df, text_base_df = select_best_text_rows(cleaned_df, odino_universe)
+
+    sidecar_path = write_dataframe(
+        sidecar_df,
+        PROCESSED_DATA_DIR / SIDECAR_STEM,
+        prefer_parquet=args.output_format == 'parquet'
+    )
+
+    if args.summary:
+        text_conflict_df = build_conflict_report(text_base_df, sidecar_df)
+        overlap_df = build_overlap_report(sidecar_df)
+        text_conflict_path = OUTPUTS_DIR / TEXT_CONFLICT_NAME
+        overlap_path = OUTPUTS_DIR / OVERLAP_NAME
+        text_conflict_df.to_csv(text_conflict_path, index=False)
+        overlap_df.to_csv(overlap_path, index=False)
+        print(f"[write] {text_conflict_path}")
+        print(f"[write] {overlap_path}")
+
+    print(f"[write] {sidecar_path}")
+    print("")
+    print("[done 3/3] Component text sidecar finished")
+    print("All preprocessing steps completed successfully")
     return 0
 
 

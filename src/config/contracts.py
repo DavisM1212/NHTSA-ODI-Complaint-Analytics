@@ -11,10 +11,7 @@ from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR
 # -----------------------------------------------------------------------------
 COMBINED_COMPLAINTS_STEM = 'odi_complaints_combined'
 CLEANED_COMPLAINTS_STEM = 'odi_complaints_cleaned'
-CLEANING_AUDIT_STEM = 'odi_complaints_cleaning_audit'
 SEVERITY_CASES_STEM = 'odi_severity_cases'
-COMPONENT_ROWS_STEM = 'odi_component_rows'
-COMPONENT_CASE_BASE_STEM = 'odi_component_case_base'
 COMPONENT_SINGLE_LABEL_CASES_STEM = 'odi_component_single_label_cases'
 COMPONENT_MULTILABEL_CASES_STEM = 'odi_component_multilabel_cases'
 COMPONENT_TEXT_SIDECAR_STEM = 'odi_component_text_sidecar'

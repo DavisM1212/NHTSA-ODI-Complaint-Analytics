@@ -17,7 +17,6 @@ from src.data.io_utils import (
     minor_preprocess_complaints,
     read_tabular_file,
     safe_extract_zip,
-    sanitize_name,
     write_dataframe,
 )
 from src.data.schema_checks import (
@@ -67,20 +66,13 @@ def process_table_file(table_path, source_zip_name, output_format):
     )
     print_schema_report(report)
 
-    base_name = sanitize_name(f"{table_path.stem}_processed")
-    output_stem = PROCESSED_DATA_DIR / base_name
-    output_path = write_dataframe(
-        df, output_stem, prefer_parquet=output_format == "parquet"
-    )
-
     manifest_row = {
         "source_zip": source_zip_name,
         "source_file": table_path.name,
         "rows": int(len(df)),
-        "columns": int(len(df.columns)),
-        "processed_output": str(output_path.relative_to(PROCESSED_DATA_DIR.parent))
+        "columns": int(len(df.columns))
     }
-    return df, output_path, manifest_row
+    return df, manifest_row
 
 
 def process_zip_file(zip_path, overwrite_extracted=False, output_format="parquet"):
@@ -101,10 +93,9 @@ def process_zip_file(zip_path, overwrite_extracted=False, output_format="parquet
     manifest_rows = []
     for table_path in candidate_files:
         print(f"[process] {table_path.name}")
-        df, output_path, manifest_row = process_table_file(
+        df, manifest_row = process_table_file(
             table_path, zip_path.name, output_format
         )
-        print(f"[write] {output_path}")
         frames.append(df)
         manifest_rows.append(manifest_row)
 
@@ -132,12 +123,6 @@ def parse_args():
         default=settings.OVERWRITE_EXTRACTED,
         help="Re-extract files even if they already exist under data/extracted"
     )
-    parser.add_argument(
-        "--no-combine",
-        action="store_true",
-        default=not settings.COMBINE_PROCESSED_OUTPUTS,
-        help="Skip creating a combined complaint dataset"
-    )
     return parser.parse_args()
 
 
@@ -155,8 +140,6 @@ def main():
 
     print(f"[info] Found {len(zip_files)} complaint zip file(s)")
     print(f"[info] Preferred output format: {args.output_format}")
-    if args.no_combine:
-        print("[info] Combined dataset output disabled")
 
     all_frames = []
     all_manifest_rows = []
@@ -168,8 +151,7 @@ def main():
             output_format=args.output_format
         )
         all_manifest_rows.extend(manifest_rows)
-        if not args.no_combine:
-            all_frames.extend(frames)
+        all_frames.extend(frames)
 
     if all_manifest_rows:
         manifest_df = pd.DataFrame(all_manifest_rows)
@@ -178,16 +160,15 @@ def main():
         print("")
         print(f"[write] {manifest_path}")
 
-    if not args.no_combine and all_frames:
-        print("")
-        print("[combine] Building combined complaints dataset")
-        combined_df = pd.concat(all_frames, ignore_index=True, sort=False)
-        combined_output = write_dataframe(
-            combined_df,
-            PROCESSED_DATA_DIR / settings.COMBINED_COMPLAINT_OUTPUT_STEM,
-            prefer_parquet=args.output_format == "parquet"
-        )
-        print(f"[write] {combined_output}")
+    print("")
+    print("[combine] Building combined complaints dataset")
+    combined_df = pd.concat(all_frames, ignore_index=True, sort=False)
+    combined_output = write_dataframe(
+        combined_df,
+        PROCESSED_DATA_DIR / settings.COMBINED_COMPLAINT_OUTPUT_STEM,
+        prefer_parquet=args.output_format == "parquet"
+    )
+    print(f"[write] {combined_output}")
 
     print("")
     print("[done] ODI complaint ingestion finished")
