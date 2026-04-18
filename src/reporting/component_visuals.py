@@ -26,6 +26,7 @@ from src.config.paths import OUTPUTS_DIR, PROJECT_ROOT
 DEFAULT_FIGURE_DIR = PROJECT_ROOT / 'docs' / 'figures' / 'component_models'
 OFFICIAL_SUMMARY_CSV = COMPONENT_OFFICIAL_SUMMARY_CSV
 SINGLE_TEXT_MANIFEST = COMPONENT_SINGLE_OFFICIAL_MANIFEST
+WAVE2B_CALIBRATION_MANIFEST = 'component_textwave2b_calibration_manifest.json'
 SINGLE_CLASS_METRICS = COMPONENT_SINGLE_OFFICIAL_CLASS
 SINGLE_CONFUSION = COMPONENT_SINGLE_OFFICIAL_CONFUSION
 SINGLE_CALIBRATION = COMPONENT_SINGLE_OFFICIAL_CALIBRATION
@@ -189,9 +190,9 @@ def plot_official_summary(summary_df, output_dir):
     )
 
 
-def plot_single_lift(manifest, output_dir):
-    baseline = manifest['uncalibrated_holdout_metrics']
-    promoted = manifest['official_holdout_metrics']
+def plot_single_lift(wave2b_manifest, output_dir):
+    baseline = wave2b_manifest['locked_holdout_baseline']
+    promoted = wave2b_manifest['calibrated_holdout_metrics']
     metrics = ['macro_f1', 'top_1_accuracy', 'top_3_accuracy']
     labels = ['Macro F1', 'Top-1 Accuracy', 'Top-3 Accuracy']
 
@@ -205,14 +206,14 @@ def plot_single_lift(manifest, output_dir):
         positions - width / 2,
         baseline_values,
         width,
-        label='Uncalibrated late fusion',
+        label='Structured CatBoost baseline',
         color=FIGURE_STYLE['baseline']
     )
     ax.bar(
         positions + width / 2,
         promoted_values,
         width,
-        label='Calibrated official model',
+        label='Calibrated text + structured fusion',
         color=FIGURE_STYLE['promoted']
     )
 
@@ -233,7 +234,7 @@ def plot_single_lift(manifest, output_dir):
     ax.legend(frameon=False, loc='upper left')
     setup_axes(
         ax,
-        'Single-Label Calibration Lift On Holdout',
+        'Single-Label Model Lift From Complaint Narrative Text',
         xlabel=None,
         ylabel='Holdout metric'
     )
@@ -241,8 +242,8 @@ def plot_single_lift(manifest, output_dir):
         fig,
         output_dir,
         'component_single_label_model_lift',
-        'Single-Label Calibration Lift On Holdout',
-        'Holdout metric lift from uncalibrated late fusion to the calibrated official single-label model'
+        'Single-Label Model Lift From Complaint Narrative Text',
+        'Holdout metric lift from structured CatBoost to calibrated text plus structured late fusion'
     )
 
 
@@ -393,7 +394,7 @@ def generate_component_visuals(outputs_dir=OUTPUTS_DIR, output_dir=DEFAULT_FIGUR
     output_dir = Path(output_dir)
 
     summary_df = read_csv(outputs_dir, OFFICIAL_SUMMARY_CSV)
-    single_manifest = read_json(outputs_dir, SINGLE_TEXT_MANIFEST)
+    wave2b_manifest = read_json(outputs_dir, WAVE2B_CALIBRATION_MANIFEST)
     single_class_df = read_csv(outputs_dir, SINGLE_CLASS_METRICS)
     single_confusion_df = read_csv(outputs_dir, SINGLE_CONFUSION)
     single_calibration_df = read_csv(outputs_dir, SINGLE_CALIBRATION)
@@ -401,7 +402,7 @@ def generate_component_visuals(outputs_dir=OUTPUTS_DIR, output_dir=DEFAULT_FIGUR
 
     rows = [
         plot_official_summary(summary_df, output_dir),
-        plot_single_lift(single_manifest, output_dir),
+        plot_single_lift(wave2b_manifest, output_dir),
         plot_single_class_f1(single_class_df, output_dir),
         plot_single_calibration(single_calibration_df, output_dir),
         plot_single_confusion(single_confusion_df, output_dir),

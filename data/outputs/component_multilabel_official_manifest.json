@@ -1,0 +1,134 @@
+{
+  "artifact_role": "component_multilabel_official",
+  "target_scope": "multi_label_component_routing",
+  "task": "multi_label_component_routing",
+  "input_stem": "odi_component_multilabel_cases",
+  "input_path": "C:\\Users\\davis\\OneDrive\\Documents\\VS Code Repos\\NHTSA-ODI-Complaint-Analytics\\data\\processed\\odi_component_multilabel_cases.parquet",
+  "official_model": "CatBoost MultiLabel",
+  "selected_model": "CatBoost MultiLabel",
+  "selected_feature_set": "core_structured",
+  "feature_manifest": {
+    "feature_set_name": "core_structured",
+    "feature_cols": [
+      "mfr_name",
+      "maketxt",
+      "modeltxt",
+      "state",
+      "cmpl_type",
+      "drive_train",
+      "fuel_sys",
+      "fuel_type",
+      "trans_type",
+      "fire",
+      "crash",
+      "medical_attn",
+      "vehicles_towed_yn",
+      "yeartxt",
+      "miles",
+      "veh_speed",
+      "injured",
+      "lag_days_safe",
+      "miles_missing_flag",
+      "veh_speed_missing_flag",
+      "miles_zero_flag",
+      "veh_speed_zero_flag"
+    ],
+    "cat_cols": [
+      "mfr_name",
+      "maketxt",
+      "modeltxt",
+      "state",
+      "cmpl_type",
+      "drive_train",
+      "fuel_sys",
+      "fuel_type",
+      "trans_type",
+      "fire",
+      "crash",
+      "medical_attn",
+      "vehicles_towed_yn"
+    ],
+    "num_cols": [
+      "yeartxt",
+      "miles",
+      "veh_speed",
+      "injured",
+      "lag_days_safe"
+    ],
+    "flag_cols": [
+      "miles_missing_flag",
+      "veh_speed_missing_flag",
+      "miles_zero_flag",
+      "veh_speed_zero_flag"
+    ]
+  },
+  "selected_threshold": 0.2,
+  "selected_iteration": 1200,
+  "official_metric": "macro_f1 then micro_f1 on valid_2025, reported on holdout_2026",
+  "official_holdout_metrics": {
+    "model": "CatBoost MultiLabel",
+    "stage": "final_holdout",
+    "split": "holdout_2026",
+    "rows": 10192,
+    "fit_seconds": 173.9,
+    "selected_iteration": 1200.0,
+    "threshold": 0.2,
+    "micro_f1": 0.4571,
+    "macro_f1": 0.2285,
+    "recall_at_3": 0.6751,
+    "precision_at_3": 0.3027,
+    "label_coverage": 0.8
+  },
+  "candidate_models": [
+    "Most Frequent Labels",
+    "OneVsRest Logistic",
+    "CatBoost MultiLabel"
+  ],
+  "promotion_status": "official",
+  "reporting_ready": true,
+  "catboost_runtime": {
+    "requested_task_type": "GPU",
+    "selection_task_type": "GPU",
+    "holdout_task_type": "GPU",
+    "selection_fallback_reason": null,
+    "holdout_fallback_reason": null
+  },
+  "selection_policy": {
+    "primary": "macro_f1 on valid_2025",
+    "secondary": [
+      "micro_f1",
+      "recall_at_3",
+      "precision_at_3"
+    ],
+    "threshold_grid": [
+      0.2,
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6,
+      0.65,
+      0.7
+    ],
+    "min_positive_labels": 1
+  },
+  "split_policy": {
+    "train_end": "2024-12-31",
+    "valid_end": "2025-12-31",
+    "holdout_policy": "2026 holdout untouched during threshold and model choice"
+  },
+  "split_rows": {
+    "train": 268362,
+    "valid_2025": 68036,
+    "holdout_2026": 10192,
+    "dev_2020_2025": 336398
+  },
+  "artifacts": {
+    "split_summary": "C:\\Users\\davis\\OneDrive\\Documents\\VS Code Repos\\NHTSA-ODI-Complaint-Analytics\\data\\outputs\\component_multilabel_official_split_summary.csv",
+    "metrics": "C:\\Users\\davis\\OneDrive\\Documents\\VS Code Repos\\NHTSA-ODI-Complaint-Analytics\\data\\outputs\\component_multilabel_official_metrics.csv",
+    "label_metrics": "C:\\Users\\davis\\OneDrive\\Documents\\VS Code Repos\\NHTSA-ODI-Complaint-Analytics\\data\\outputs\\component_multilabel_official_label_metrics.csv"
+  }
+}

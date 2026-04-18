@@ -3,21 +3,21 @@
     {
       "task": "single_label_component",
       "official_model": "text_structured_late_fusion",
-      "artifact_role": "text_wave2b_calibration",
+      "artifact_role": "component_single_label_official",
       "feature_set": "wave1_incident_cohort_history",
       "holdout_rows": 6995,
-      "macro_f1": 0.7454,
-      "top_1_accuracy": 0.8523,
-      "top_3_accuracy": 0.95,
-      "ece": 0.0243,
+      "macro_f1": 0.7466,
+      "top_1_accuracy": 0.8522,
+      "top_3_accuracy": 0.9481,
+      "ece": 0.0251,
       "calibration_method": "power",
       "calibration_alpha": 1.5,
-      "status": "promoted"
+      "status": "official"
     },
     {
       "task": "multi_label_component_routing",
       "official_model": "CatBoost MultiLabel",
-      "artifact_role": "final_benchmark",
+      "artifact_role": "component_multilabel_official",
       "feature_set": "core_structured",
       "holdout_rows": 10192,
       "macro_f1": 0.2285,

@@ -1,8 +1,7 @@
 figure,path,title,description
 component_official_benchmark_summary,docs/figures/component_models/component_official_benchmark_summary.png,Final Component Model Benchmarks,Official holdout metrics for the locked single-label and multi-label component models
 component_single_label_model_lift,docs/figures/component_models/component_single_label_model_lift.png,Single-Label Model Lift From Complaint Narrative Text,Holdout metric lift from structured CatBoost to calibrated text plus structured late fusion
-component_single_label_class_f1,docs/figures/component_models/component_single_label_class_f1.png,Single-Label Holdout F1 By Component Group,Per-class F1 for the promoted calibrated single-label component model
-component_single_label_calibration,docs/figures/component_models/component_single_label_calibration.png,Single-Label Calibration After Power Scaling,Reliability plot for the calibrated single-label text plus structured fusion model
+component_single_label_class_f1,docs/figures/component_models/component_single_label_class_f1.png,Single-Label Holdout F1 By Component Group,Per-class F1 for the official calibrated single-label component model
+component_single_label_calibration,docs/figures/component_models/component_single_label_calibration.png,Single-Label Calibration After Power Scaling,Reliability plot for the official calibrated single-label late-fusion model
 component_single_label_confusion_major,docs/figures/component_models/component_single_label_confusion_major.png,Single-Label Major-Group Confusion Pattern,Row-normalized confusion heatmap for major single-label component groups
 component_multilabel_class_f1,docs/figures/component_models/component_multilabel_class_f1.png,Multi-Label Routing Holdout F1 By Component Group,Per-label F1 for the official structured CatBoost multi-label routing model
-component_target_scope,docs/figures/component_models/component_target_scope.png,Component Target Scope And Excluded Multi-Label Cases,Single-label benchmark coverage versus multi-label-only cases and severity rate

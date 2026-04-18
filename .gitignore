@@ -64,5 +64,5 @@ checkpoints/
 !data/raw/**
 !data/raw/*.zip
 !.gitkeep
-!data/outputs/component_official_benchmark_summary.csv
-!data/outputs/component_official_benchmark_summary.json
+!data/outputs/*official*
+!data/outputs/component_textwave2b_calibration_manifest.json
