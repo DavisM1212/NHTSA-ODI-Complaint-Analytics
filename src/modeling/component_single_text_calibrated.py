@@ -25,6 +25,7 @@ from src.modeling.common.helpers import (
     build_multiclass_class_df,
     build_multiclass_confusion_df,
     feature_manifest,
+    log_line,
     prep_single_label_cases,
     score_multiclass_from_proba,
     split_single_label_cases_by_mode,
@@ -41,7 +42,6 @@ from src.modeling.common.text_fusion import (
     fit_single_structured_family,
     fit_single_structured_holdout,
     fit_single_text_family,
-    log_line,
     merge_text_sidecar,
 )
 

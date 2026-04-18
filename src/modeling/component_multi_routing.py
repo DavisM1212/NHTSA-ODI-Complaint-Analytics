@@ -35,8 +35,9 @@ from src.modeling.common.helpers import (
     apply_multilabel_threshold,
     build_metric_row,
     feature_manifest,
-    fit_catboost_holdout_stage,
-    fit_catboost_selection_stage,
+    fit_catboost_holdout_with_fallback,
+    fit_catboost_selection_with_fallback,
+    log_line,
     parse_pipe_labels,
     prep_multi_label_cases,
     select_multilabel_threshold,
@@ -64,10 +65,6 @@ DEF_OVR_N_JOBS = 1
 # -----------------------------------------------------------------------------
 # Small helpers
 # -----------------------------------------------------------------------------
-def log_line(message=''):
-    print(message, flush=True)
-
-
 def parse_threshold_text(threshold_text):
     if not threshold_text:
         return list(DEF_THRESHOLDS)
@@ -457,7 +454,7 @@ def main():
 
     log_line('')
     log_line('[phase 3/4] CatBoost multi-label candidate')
-    catboost_selection = fit_catboost_selection_stage(
+    catboost_selection = fit_catboost_selection_with_fallback(
         train_df,
         valid_df,
         y_train,
@@ -546,7 +543,7 @@ def main():
         f'micro_f1={metric_rows[-1]["micro_f1"]:.4f}'
     )
 
-    catboost_holdout = fit_catboost_holdout_stage(
+    catboost_holdout = fit_catboost_holdout_with_fallback(
         dev_df,
         holdout_df,
         y_dev,
