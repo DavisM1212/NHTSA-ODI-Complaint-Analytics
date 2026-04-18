@@ -29,22 +29,38 @@ Important data workflow rule:
 
 ## Current Status
 
-The repo is now beyond the initial scaffold stage. Current completed work includes:
+The repo has a stable, production-ready pipeline for component-level complaint routing. The workflow is organized into four clear stages:
 
-- `notebooks/EDA.ipynb`: structural audit of the complaint data
-- `notebooks/Cleaning.ipynb`: reviewed cleaning decisions tied to `docs/CMPL.txt`
-- `src/preprocessing/clean_complaints.py`: reproducible shared cleaning pipeline
-- `src/features/collapse_components.py`: single-label and multi-label component case table builder
-- `notebooks/Component_Modeling.ipynb`: exploratory modeling workflow for the original single-label benchmark
-- `src/modeling/official/component_single_text_calibrated.py`: official single-label component benchmark
-- `src/modeling/official/component_multi_routing.py`: official multi-label routing benchmark
-- `src/modeling/experiments/component_single_structured_tuning.py`: focused structured single-label tuning
-- `src/modeling/experiments/component_single_structured_baseline.py`: structured single-label benchmark baseline
-- `src/features/component_text_sidecar.py`: shared component narrative sidecar for leakage-aware text modeling
-- `src/modeling/experiments/component_text_wave2.py`: Wave 2 text-feature experiment runner for component modeling
-- `src/modeling/experiments/component_feature_wave1.py`: structured feature-family sweep runner
-- `notebooks/Severity_Ranking_Framework.ipynb`: scaffold for severity ranking
-- `notebooks/NLP_Early_Warning_Framework.ipynb`: scaffold for monthly early-warning watchlists
+### Stage 1: Ingestion
+
+- `src/data/ingest_odi.py`: Extract and validate ODI complaints from raw ZIP files
+- Output: `data/processed/odi_complaints_combined.*`
+
+### Stage 2: Cleaning + Features
+
+- `src/preprocessing/clean_complaints.py`: Conservative cleaning, severity flagging, date validation
+- `src/features/collapse_components.py`: Component row collapsing, single/multi-label case tables
+- `src/features/component_text_sidecar.py`: Text feature engineering for NLP tasks
+- Outputs: Cleaned complaints, component case tables, text sidecar
+
+### Stage 3: Main Models
+
+- `src/modeling/component_single_text_calibrated.py`: Official single-label component router (text + structured, late fusion)
+- `src/modeling/component_multi_routing.py`: Official multi-label component router (structured only)
+- Outputs: Model manifests, metrics, calibration, holdout predictions
+
+### Stage 4: Reporting
+
+- `src/reporting/component_visuals.py`: Generate confusion matrices, calibration plots
+- `src/reporting/update_component_readme.py`: Update README with latest results
+- Outputs: `docs/figures/component_models/*.png`
+
+### Future Work (WIP in notebooks)
+
+- `notebooks/Severity_Ranking_Framework.ipynb`: Scaffold for severity prioritization (not yet pipeline-hardened)
+- `notebooks/NLP_Early_Warning_Framework.ipynb`: Scaffold for anomaly detection (not yet pipeline-hardened)
+
+**See [src/PIPELINE.md](src/PIPELINE.md) for detailed architecture and execution instructions.**
 
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
@@ -763,13 +779,13 @@ After raw ingestion, the durable component flow is:
 #### Official single-label component model
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.official.component_single_text_calibrated --task-type CPU
+.\.venv\Scripts\python.exe -m src.modeling.component_single_text_calibrated --task-type CPU
 ```
 
 #### Official multi-label routing model
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.official.component_multi_routing --task-type CPU
+.\.venv\Scripts\python.exe -m src.modeling.component_multi_routing --task-type CPU
 ```
 
 #### Refresh generated reporting
