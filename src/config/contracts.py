@@ -36,7 +36,7 @@ COMPONENT_TEXT_OVERLAP_NAME = 'component_text_overlap_report.csv'
 
 
 # -----------------------------------------------------------------------------
-# Official reporting artifacts
+# Reporting artifacts
 # -----------------------------------------------------------------------------
 README_START = '<!-- COMPONENT_BENCHMARK_START -->'
 README_END = '<!-- COMPONENT_BENCHMARK_END -->'
@@ -45,6 +45,7 @@ COMPONENT_SINGLE_OFFICIAL_MANIFEST = 'component_single_label_official_manifest.j
 COMPONENT_MULTI_OFFICIAL_MANIFEST = 'component_multilabel_official_manifest.json'
 COMPONENT_OFFICIAL_SUMMARY_CSV = 'component_official_benchmark_summary.csv'
 COMPONENT_OFFICIAL_SUMMARY_JSON = 'component_official_benchmark_summary.json'
+COMPONENT_TEXT_WAVE2B_CALIBRATION_MANIFEST = 'component_textwave2b_calibration_manifest.json'
 
 COMPONENT_SINGLE_OFFICIAL_HOLDOUT = 'component_single_label_official_holdout.csv'
 COMPONENT_SINGLE_OFFICIAL_SELECT_GRID = 'component_single_label_official_select_grid.csv'
@@ -107,6 +108,10 @@ SPLIT_POLICIES = {
     }
 }
 
+
+# -----------------------------------------------------------------------------
+# Small helpers
+# -----------------------------------------------------------------------------
 def get_split_policy(split_mode=BENCHMARK_SPLIT_MODE):
     if split_mode not in SPLIT_POLICIES:
         choices = ', '.join(sorted(SPLIT_POLICIES))

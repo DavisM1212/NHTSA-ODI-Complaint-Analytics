@@ -16,15 +16,16 @@ from src.config.contracts import (
     COMPONENT_SINGLE_OFFICIAL_CALIBRATION,
     COMPONENT_SINGLE_OFFICIAL_CLASS,
     COMPONENT_SINGLE_OFFICIAL_CONFUSION,
+    COMPONENT_TEXT_WAVE2B_CALIBRATION_MANIFEST,
 )
 from src.config.paths import OUTPUTS_DIR, PROJECT_ROOT
 
 # -----------------------------------------------------------------------------
-# Paths and artifact names
+# Artifact names
 # -----------------------------------------------------------------------------
 DEFAULT_FIGURE_DIR = PROJECT_ROOT / 'docs' / 'figures' / 'component_models'
 OFFICIAL_SUMMARY_CSV = COMPONENT_OFFICIAL_SUMMARY_CSV
-WAVE2B_CALIBRATION_MANIFEST = 'component_textwave2b_calibration_manifest.json'
+WAVE2B_CALIBRATION_MANIFEST = COMPONENT_TEXT_WAVE2B_CALIBRATION_MANIFEST
 SINGLE_CLASS_METRICS = COMPONENT_SINGLE_OFFICIAL_CLASS
 SINGLE_CONFUSION = COMPONENT_SINGLE_OFFICIAL_CONFUSION
 SINGLE_CALIBRATION = COMPONENT_SINGLE_OFFICIAL_CALIBRATION

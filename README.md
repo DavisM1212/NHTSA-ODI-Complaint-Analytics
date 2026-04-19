@@ -59,7 +59,7 @@ The repo has a stable, production-ready pipeline for component-level complaint r
 - `notebooks/Severity_Ranking_Framework.ipynb`: Scaffold for severity prioritization (not yet pipeline-hardened)
 - `notebooks/NLP_Early_Warning_Framework.ipynb`: Scaffold for anomaly detection (not yet pipeline-hardened)
 
-**See [src/PIPELINE.md](src/PIPELINE.md) for detailed architecture and execution instructions.**
+**See [src/PIPELINE.md](src/PIPELINE.md) for the live pipeline contract and execution instructions.**
 
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
@@ -170,8 +170,7 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |-- docs/
 |   |-- CMPL.txt
 |   |-- RCL.txt
-|   |-- figures/
-|   `-- ...
+|   `-- figures/
 |-- data/
 |   |-- raw/         # committed source zips + checksum manifest
 |   |-- extracted/   # local extracted txt/csv files (ignored)
@@ -192,14 +191,18 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- Cleaning.ipynb
 |   |-- Component_Modeling.ipynb
 |   |-- Severity_Ranking_Framework.ipynb
-|   `-- NLP_Early_Warning_Framework.ipynb
+|   |-- NLP_Early_Warning_Framework.ipynb
+|   `-- archive/
+|       |-- component_feature_wave1.py
+|       |-- component_single_structured_baseline.py
+|       |-- component_single_structured_tuning.py
+|       |-- component_text_wave2.py
+|       `-- tuning_shared.py
 `-- src/
-    |-- __init__.py
     |-- config/
     |   |-- paths.py
     |   |-- constants.py
     |   |-- contracts.py
-    |   |-- split_policy.py
     |   `-- settings.py
     |-- data/
     |   |-- ingest_odi.py
@@ -208,18 +211,15 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |   `-- io_utils.py
     |-- preprocessing/
     |   `-- clean_complaints.py
-    |-- features/
-    |   |-- collapse_components.py
-    |   `-- component_text_sidecar.py
     |-- modeling/
-    |   |-- common/
-    |   |-- official/
-    |   `-- experiments/
-    |-- evaluation/
-    |-- nlp/
-    |-- signals/
-    |-- integration/
+    |   |-- component_single_text_calibrated.py
+    |   |-- component_multi_routing.py
+    |   `-- common/
+    |       |-- helpers.py
+    |       `-- text_fusion.py
     `-- reporting/
+        |-- component_visuals.py
+        `-- update_component_readme.py
 ```
 
 ## Repository File/Folder Guide
@@ -330,10 +330,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Current key outputs include:
   - `odi_complaints_combined.parquet`
   - `odi_complaints_cleaned.parquet`
-  - `odi_complaints_cleaning_audit.parquet`
   - `odi_severity_cases.parquet`
-  - `odi_component_rows.parquet`
-  - `odi_component_case_base.parquet`
   - `odi_component_single_label_cases.parquet`
   - `odi_component_multilabel_cases.parquet`
   - `odi_component_text_sidecar.parquet`
@@ -341,11 +338,10 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 `data/outputs/`
 
-- Run manifests, summaries, diagnostics, and model benchmark artifacts
+- Official artifacts plus downstream-supporting manifests, summaries, diagnostics, and benchmark artifacts
 - Useful for verifying what a pipeline run produced
 - Current examples include:
-  - `clean_complaints_summary.csv`
-  - `collapse_components_summary.csv`
+  - `component_textwave2b_calibration_manifest.json`
   - `component_single_label_official_manifest.json`
   - `component_multilabel_official_manifest.json`
   - `component_official_benchmark_summary.csv`
@@ -453,6 +449,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Shared project configuration and path constants
 - `paths.py`: central filesystem paths (repo root, data folders, outputs)
 - `constants.py`: project constants and common field-name hints
+- `contracts.py`: centralized persisted artifact names, stable year anchors, and split policies
 - `settings.py`: runtime options controlled by environment variables
 
 `src/data/`
@@ -689,7 +686,6 @@ Optional flags:
 ```powershell
 .\scripts\run_ingest_windows.ps1 -OutputFormat csv
 .\scripts\run_ingest_windows.ps1 -OverwriteExtracted
-.\scripts\run_ingest_windows.ps1 -NoCombine
 ```
 
 ### Run ingest only (macOS / Linux)
@@ -719,20 +715,17 @@ Optional flags:
 - reads `.txt/.csv/.tsv` files into pandas
 - assigns official complaint schema column names from `docs/CMPL.txt`
 - applies minor preprocessing (trim strings, parse some date-like fields, coerce common model year columns)
-- writes processed parquet (preferred) or CSV outputs to `data/processed/`
-- optionally builds a combined complaint dataset
-- writes run manifests and simple summaries to `data/outputs/`
+- always writes the combined complaint dataset to `data/processed/`
+- writes the ODI ingest manifest to `data/outputs/`
 
 ### Run the official component flow manually
 
 After raw ingestion, the durable component flow is:
 
 1. shared cleaning
-2. component row and case-table build
-3. component narrative sidecar build
-4. official single-label model
-5. official multi-label model
-6. reporting refresh
+2. official single-label model
+3. official multi-label model
+4. reporting refresh
 
 #### Shared cleaning
 
@@ -740,17 +733,7 @@ After raw ingestion, the durable component flow is:
 .\.venv\Scripts\python.exe -m src.preprocessing.clean_complaints --output-format parquet
 ```
 
-#### Component case collapse
-
-```powershell
-.\.venv\Scripts\python.exe -m src.features.collapse_components --output-format parquet
-```
-
-#### Component narrative sidecar
-
-```powershell
-.\.venv\Scripts\python.exe -m src.features.component_text_sidecar --output-format parquet
-```
+This one step writes the cleaned complaints table, the severity cases table, the single-label and multi-label component case tables, and the component text sidecar. Add `--summary` only when you want the optional troubleshooting CSVs in `data/outputs/`.
 
 #### Official single-label component model
 
@@ -776,35 +759,35 @@ After raw ingestion, the durable component flow is:
 .\.venv\Scripts\python.exe -m src.reporting.component_visuals
 ```
 
-### Run experiment entrypoints manually
+### Run archive experiment entrypoints manually
 
-These are still available, but they are not part of the official reporting contract.
+These scripts are archived under `notebooks/archive/`. They remain useful for historical comparisons and heavier experimentation, but they are not part of the official reporting contract.
 
 #### Structured single-label tuning
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.experiments.component_single_structured_tuning --task-type CPU --n-trials 40 --seed-list 42,43,44,45,46
+.\.venv\Scripts\python.exe notebooks/archive/component_single_structured_tuning.py --task-type CPU --n-trials 40 --seed-list 42,43,44,45,46
 ```
 
 #### Structured single-label benchmark baseline
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.experiments.component_single_structured_baseline --task-type CPU
+.\.venv\Scripts\python.exe notebooks/archive/component_single_structured_baseline.py --task-type CPU
 ```
 
 #### Wave 1 structured feature sweep
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.experiments.component_feature_wave1 --task-type GPU --devices 0
+.\.venv\Scripts\python.exe notebooks/archive/component_feature_wave1.py --task-type GPU --devices 0
 ```
 
 #### Wave 2 text and fusion exploration
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.modeling.experiments.component_text_wave2 --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
+.\.venv\Scripts\python.exe notebooks/archive/component_text_wave2.py --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
 ```
 
-These commands produce the official benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/`.
+The official pipeline commands above produce the benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/`. The archive scripts write their own exploratory manifests and tables, but those are not part of the supported reporting surface.
 
 ## Git Basics Overview
 

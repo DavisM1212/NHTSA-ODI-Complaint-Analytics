@@ -20,3 +20,11 @@ def test_official_runner_scripts_call_the_new_pipeline_modules():
         assert 'src.modeling.component_multi_routing' in text
         assert 'src.reporting.update_component_readme' in text
         assert 'src.reporting.component_visuals' in text
+
+
+def test_windows_ingest_runner_matches_current_ingest_cli():
+    windows_text = (PROJECT_ROOT / 'scripts' / 'run_ingest_windows.ps1').read_text(encoding='utf-8')
+
+    assert 'src.data.ingest_odi' in windows_text
+    assert '-NoCombine' not in windows_text
+    assert '--no-combine' not in windows_text

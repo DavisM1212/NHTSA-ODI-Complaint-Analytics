@@ -1,8 +1,7 @@
 param(
     [ValidateSet("parquet", "csv")]
     [string]$OutputFormat = "parquet",
-    [switch]$OverwriteExtracted,
-    [switch]$NoCombine
+    [switch]$OverwriteExtracted
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,9 +34,6 @@ if ($LASTEXITCODE -ne 0) {
 $moduleArgs = @("-m", "src.data.ingest_odi", "--output-format", $OutputFormat)
 if ($OverwriteExtracted) {
     $moduleArgs += "--overwrite-extracted"
-}
-if ($NoCombine) {
-    $moduleArgs += "--no-combine"
 }
 
 Write-Step "Running ODI complaint extraction + combine"

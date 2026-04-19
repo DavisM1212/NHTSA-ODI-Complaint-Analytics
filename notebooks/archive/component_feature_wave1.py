@@ -1,12 +1,11 @@
 import argparse
-import json
 import sys
-from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 import optuna
 import pandas as pd
+import tuning_shared as tune
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.preprocessing import MultiLabelBinarizer
 
@@ -49,12 +48,7 @@ from src.modeling.common.helpers import (
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
-LOCKED_SINGLE_MANIFEST = OUTPUTS_DIR / 'component_single_label_benchmark_manifest.json'
-LOCKED_SINGLE_SELECTION = OUTPUTS_DIR / 'component_single_label_selection_manifest.json'
-LOCKED_SINGLE_CALIBRATION = OUTPUTS_DIR / 'component_single_label_holdout_calibration.csv'
-LOCKED_MULTI_MANIFEST = OUTPUTS_DIR / 'component_multilabel_manifest.json'
-
-GLOBAL_MANIFEST_NAME = 'component_featurewave1_manifest.json'
+GLOBAL_MANIFEST_NAME = tune.FEATURE_WAVE1_GLOBAL_MANIFEST_NAME
 SINGLE_SCREEN_NAME = 'component_single_label_featurewave1_screen.csv'
 SINGLE_SELECT_NAME = 'component_single_label_featurewave1_select.csv'
 SINGLE_HOLDOUT_NAME = 'component_single_label_featurewave1_holdout.csv'
@@ -69,7 +63,7 @@ MULTI_LABEL_NAME = 'component_multilabel_featurewave1_label_metrics.csv'
 # -----------------------------------------------------------------------------
 # Wave defaults
 # -----------------------------------------------------------------------------
-FEATUREWAVE_TASK = 'feature_wave1'
+FEATUREWAVE_TASK = tune.FEATURE_WAVE1_TASK
 SINGLE_PROMOTE_SELECT_DELTA = 0.010
 SINGLE_PROMOTE_HOLDOUT_DELTA = 0.010
 SINGLE_TOP3_DROP_LIMIT = 0.005
@@ -84,9 +78,11 @@ SINGLE_TUNE_TRIALS = 24
 SINGLE_TUNE_ITER_MAX = 2200
 SINGLE_SCREEN_EVAL_PERIOD = 25
 
-
-def log_line(message=''):
-    print(message, flush=True)
+log_line = tune.log_line
+load_json = tune.load_json
+read_locked_single_ece = tune.read_locked_single_ece
+evaluate_params_across_seeds = tune.evaluate_params_across_seeds
+summarize_seed_metrics = tune.summarize_seed_metrics
 
 
 def log_family_start(task_name, stage_name, feature_name, run_idx, run_total):
@@ -115,12 +111,6 @@ def log_multi_result(stage_name, feature_name, row, result):
         f'micro_f1={float(row["micro_f1"]):.4f} '
         f'recall@3={float(row["recall_at_3"]):.4f}'
     )
-
-
-def load_json(path):
-    path = Path(path)
-    with path.open('r', encoding='utf-8') as handle:
-        return json.load(handle)
 
 
 def build_feature_families():
@@ -163,16 +153,6 @@ def feature_row_base(task_name, feature_info, input_path, split_mode, hyperparam
     }
 
 
-def read_locked_single_ece():
-    if not LOCKED_SINGLE_CALIBRATION.exists():
-        return None
-    calib_df = pd.read_csv(LOCKED_SINGLE_CALIBRATION)
-    overall = calib_df.loc[calib_df['section'].eq('overall')]
-    if overall.empty:
-        return None
-    return float(overall['ece'].iloc[0])
-
-
 def sort_candidate_rows(rows, keys):
     if not rows:
         return []
@@ -211,58 +191,6 @@ def keep_if_better_or_equal(candidate_row, current_row, metric_cols):
     candidate = tuple(float(candidate_row[column]) for column in metric_cols)
     current = tuple(float(current_row[column]) for column in metric_cols)
     return candidate >= current
-
-
-def evaluate_params_across_seeds(train_df, valid_df, feature_info, params, task_type, devices, seed_list, verbose, selection_eval_period=1, progress_label=None):
-    run_rows = []
-    total_seeds = len(seed_list)
-    for seed_idx, seed in enumerate(seed_list, start=1):
-        result = fit_catboost_with_external_selection(
-            train_df,
-            valid_df,
-            feature_info,
-            params,
-            task_type=task_type,
-            devices=devices,
-            random_seed=seed,
-            verbose=verbose,
-            selection_eval_period=selection_eval_period,
-            include_train_outputs=False,
-            include_valid_outputs=False
-        )
-        row = {
-            'seed': seed,
-            'fit_seconds': result['fit_seconds'],
-            'selected_iteration': result['selected_iteration'],
-            'top_1_accuracy': result['valid_metrics']['top_1_accuracy'],
-            'macro_f1': result['valid_metrics']['macro_f1'],
-            'top_3_accuracy': result['valid_metrics']['top_3_accuracy']
-        }
-        run_rows.append(row)
-
-        if progress_label:
-            log_line(
-                f'[{progress_label}] seed {seed_idx}/{total_seeds} ({seed}) '
-                f'fit={row["fit_seconds"]:.2f}s iter={row["selected_iteration"]} '
-                f'macro_f1={row["macro_f1"]:.4f} top1={row["top_1_accuracy"]:.4f} '
-                f'top3={row["top_3_accuracy"]:.4f}'
-            )
-    return pd.DataFrame(run_rows)
-
-
-def summarize_seed_metrics(run_df):
-    return {
-        'fit_seconds_mean': round(float(run_df['fit_seconds'].mean()), 2),
-        'fit_seconds_std': round(float(run_df['fit_seconds'].std(ddof=0)), 2),
-        'selected_iteration_mean': round(float(run_df['selected_iteration'].mean()), 2),
-        'selected_iteration_median': int(run_df['selected_iteration'].median()),
-        'top_1_accuracy_mean': round(float(run_df['top_1_accuracy'].mean()), 4),
-        'top_1_accuracy_std': round(float(run_df['top_1_accuracy'].std(ddof=0)), 4),
-        'macro_f1_mean': round(float(run_df['macro_f1'].mean()), 4),
-        'macro_f1_std': round(float(run_df['macro_f1'].std(ddof=0)), 4),
-        'top_3_accuracy_mean': round(float(run_df['top_3_accuracy'].mean()), 4),
-        'top_3_accuracy_std': round(float(run_df['top_3_accuracy'].std(ddof=0)), 4)
-    }
 
 
 # -----------------------------------------------------------------------------
@@ -1065,9 +993,9 @@ def main():
         raise ValueError('Nothing to do: both single and multi tasks were skipped')
 
     feature_families = build_feature_families()
-    locked_single_manifest = load_json(LOCKED_SINGLE_MANIFEST)
-    locked_single_selection = load_json(LOCKED_SINGLE_SELECTION)
-    locked_multi_manifest = load_json(LOCKED_MULTI_MANIFEST)
+    locked_single_manifest = load_json(tune.LOCKED_SINGLE_MANIFEST)
+    locked_single_selection = load_json(tune.LOCKED_SINGLE_SELECTION)
+    locked_multi_manifest = load_json(tune.LOCKED_MULTI_MANIFEST)
 
     global_manifest = {
         'artifact_role': FEATUREWAVE_TASK,

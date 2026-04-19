@@ -3,6 +3,7 @@ import shutil
 
 import pandas as pd
 
+from src.config.contracts import COMPONENT_TEXT_WAVE2B_CALIBRATION_MANIFEST
 from src.config.paths import OUTPUTS_DIR
 from src.reporting.component_visuals import generate_component_visuals
 
@@ -45,7 +46,7 @@ def test_generate_component_visuals_writes_expected_files():
                 }
             ]
         )
-        with (outputs_dir / 'component_textwave2b_calibration_manifest.json').open('w', encoding='utf-8') as handle:
+        with (outputs_dir / COMPONENT_TEXT_WAVE2B_CALIBRATION_MANIFEST).open('w', encoding='utf-8') as handle:
             json.dump(
                 {
                     'locked_holdout_baseline': {

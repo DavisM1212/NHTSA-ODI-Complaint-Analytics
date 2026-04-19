@@ -1208,9 +1208,9 @@ def main():
     structured_feature_info = feature_manifest(txt_fus.STRUCTURED_FEATURE_SET)
     locked_single_select_row = tune.read_locked_single_select_baseline()
     locked_multi_select_row = tune.read_locked_multi_select_baseline()
-    locked_single_manifest = txt_fus.load_json(tune.LOCKED_SINGLE_MANIFEST)
-    locked_multi_manifest = txt_fus.load_json(tune.LOCKED_MULTI_MANIFEST)
-    locked_single_selection = txt_fus.load_json(tune.LOCKED_SINGLE_SELECTION)
+    locked_single_manifest = tune.load_json(tune.LOCKED_SINGLE_MANIFEST)
+    locked_multi_manifest = tune.load_json(tune.LOCKED_MULTI_MANIFEST)
+    locked_single_selection = tune.load_json(tune.LOCKED_SINGLE_SELECTION)
     locked_single_ece = tune.read_locked_single_ece()
 
     manifest = {

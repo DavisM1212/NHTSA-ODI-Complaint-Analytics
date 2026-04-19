@@ -47,12 +47,21 @@ from src.modeling.common.text_fusion import (
     merge_text_sidecar,
 )
 
+
+# -----------------------------------------------------------------------------
+# Artifact names
+# -----------------------------------------------------------------------------
 GLOBAL_MANIFEST_NAME = COMPONENT_SINGLE_OFFICIAL_MANIFEST
 SELECT_GRID_NAME = COMPONENT_SINGLE_OFFICIAL_SELECT_GRID
 HOLDOUT_NAME = COMPONENT_SINGLE_OFFICIAL_HOLDOUT
 CALIBRATION_NAME = COMPONENT_SINGLE_OFFICIAL_CALIBRATION
 CLASS_NAME = COMPONENT_SINGLE_OFFICIAL_CLASS
 CONFUSION_NAME = COMPONENT_SINGLE_OFFICIAL_CONFUSION
+
+
+# -----------------------------------------------------------------------------
+# Locked official defaults
+# -----------------------------------------------------------------------------
 OFFICIAL_TEXT_WEIGHT = 0.75
 OFFICIAL_STRUCTURED_PARAMS = {
     'bootstrap_type': 'Bernoulli',
@@ -82,6 +91,9 @@ DEFAULT_ALPHA_GRID = [
 ]
 
 
+# -----------------------------------------------------------------------------
+# Calibration helpers
+# -----------------------------------------------------------------------------
 def parse_float_list(value):
     values = []
     for part in str(value).split(','):
@@ -188,6 +200,10 @@ def build_holdout_overlap_rows(base_row, y_true, proba, classes, overlap_mask):
         for row in rows
     ]
 
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Fit the official calibrated single-label late-fusion component model'

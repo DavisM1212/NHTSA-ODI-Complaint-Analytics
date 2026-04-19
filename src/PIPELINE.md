@@ -1,216 +1,194 @@
 # Pipeline Architecture
 
+This file is the live source of truth for the supported `src/` pipeline. If it conflicts with `README.md`, follow this file.
+
 ## Overview
 
-The NHTSA ODI Complaint Analytics pipeline is organized into clear, sequential stages. Each stage produces stable outputs used by downstream stages.
+The pipeline is intentionally organized as four clear stages:
+
+1. Data ingestion
+2. Consolidated preprocessing
+3. Official modeling
+4. Reporting
+
+The supported `src` pipeline writes only persisted artifacts that are either official outputs or are directly consumed downstream by notebooks, models, reports, or visuals.
 
 ---
 
-## Pipeline Stages
+## Stage 1: Ingestion
 
-### Stage 1: Ingestion
+**Files**
 
-**Files**: `src/data/ingest_odi.py`, `src/data/ingest_recalls.py` (optional)
+- `src/data/ingest_odi.py`
+- `src/data/ingest_recalls.py` (optional starter workflow)
 
-Extracts complaint and recall data from raw ZIP files.
+**Reads**
 
-- **Input**: `data/raw/*.zip`
-- **Output**: `data/processed/odi_complaints_combined.*`
-- **Key Functions**: Extract, validate schema, build canonical complaint table
+- `data/raw/*.zip`
 
----
+**Writes**
 
-### Stage 2: Unified Preprocessing
+- `data/processed/odi_complaints_combined.parquet`
+- `data/outputs/ingest_odi_manifest.csv`
+- `data/outputs/ingest_recalls_extract_manifest.csv` when recall zips are extracted
 
-**Files**: `src/preprocessing/clean_complaints.py` (consolidated)
+**Notes**
 
-Single unified script that handles all preprocessing: data cleaning, case collapse, and text feature extraction. Previously this was split across 3 separate modules (`collapse_components.py`, `component_text_sidecar.py`) but has been consolidated for simpler execution and tighter data dependency management.
-
-- **Input**: `data/processed/odi_complaints_combined.*`
-- **Output**:
-  - `data/processed/odi_complaints_cleaned.parquet` (core cleaned data)
-  - `data/processed/odi_severity_cases.parquet` (severity flags for exploratory notebooks)
-  - `data/processed/odi_component_single_label_cases.parquet` (single-label cases for modeling)
-  - `data/processed/odi_component_multilabel_cases.parquet` (multi-label cases for modeling)
-  - `data/processed/odi_component_text_sidecar.parquet` (NLP text features)
-  - Optional diagnostic CSVs if `--summary` flag is used
-- **Key Functions**:
-  - **Cleaning Phase**: Validate dates, flag anomalies, standardize types, build audit trail
-  - **Case Collapse Phase**: Collapse multi-component complaint rows into single-label and multi-label case tables
-  - **Text Sidecar Phase**: Extract and normalize complaint narratives, vectorize text, handle missing values
-- **CLI**: `python -m src.preprocessing.clean_complaints [--summary]`
+- ODI complaint ingest prefers the expected zip names for predictable runs
+- Recall ingest remains optional and is not part of the core complaint-model pipeline
 
 ---
 
-### Stage 3: Main Models
+## Stage 2: Consolidated Preprocessing
 
-**Files**:
+**File**
 
-- `src/modeling/component_single_text_calibrated.py` (Component routing: single-label)
-- `src/modeling/component_multi_routing.py` (Component routing: multi-label)
+- `src/preprocessing/clean_complaints.py`
 
-Trains and evaluates official component routing models using structured + text features.
+**Reads**
 
-- **Input**: Cleaned data tables from Stage 2
-- **Output**:
-  - `data/outputs/component_single_label_official_manifest.json`
-  - `data/outputs/component_single_label_official_class_metrics.csv`
-  - `data/outputs/component_single_label_official_confusion_major.csv`
-  - `data/outputs/component_single_label_official_calibration.csv`
-  - `data/outputs/component_single_label_official_holdout.json`
-  - `data/outputs/component_multilabel_official_manifest.json`
-  - `data/outputs/component_multilabel_official_metrics.csv`
-  - `data/outputs/component_multilabel_official_label_metrics.csv`
-- **Model Details**: CatBoost for structured features + linear models for text fusion
-- **Validation**: Time-aware splits (2020–2024 train, 2025 valid, 2026 holdout)
+- `data/processed/odi_complaints_combined.parquet`
 
----
+**Writes**
 
-### Stage 4: Reporting
+- `data/processed/odi_complaints_cleaned.parquet`
+- `data/processed/odi_severity_cases.parquet`
+- `data/processed/odi_component_single_label_cases.parquet`
+- `data/processed/odi_component_multilabel_cases.parquet`
+- `data/processed/odi_component_text_sidecar.parquet`
 
-**Files**: `src/reporting/component_visuals.py`, `src/reporting/update_component_readme.py`
+**Optional troubleshooting outputs**
 
-Generates visualizations and updates project README with official results.
+These are only written when `--summary` is passed and are kept as opt-in diagnostics:
 
-- **Input**: Official model outputs from Stage 3
-- **Output**:
-  - `docs/figures/component_models/*.png`
-  - Modified `README.md`
-- **Key Functions**: Render confusion matrices, calibration plots, class metrics visualizations
+- `data/outputs/clean_complaints_summary.csv`
+- `data/outputs/clean_complaints_source_era_drift.csv`
+- `data/outputs/collapse_components_summary.csv`
+- `data/outputs/collapse_components_conflicts.csv`
+- `data/outputs/component_target_scope_summary.csv`
+- `data/outputs/component_target_scope_groups.csv`
+- `data/outputs/component_text_sidecar_conflicts.csv`
+- `data/outputs/component_text_overlap_report.csv`
 
----
+**Notes**
 
-## Future Stages (WIP in notebooks)
-
-### Severity Ranking Framework
-
-**Location**: `notebooks/Severity_Ranking_Framework.ipynb`
-
-Will build models to prioritize complaints by severity. Not yet hardened into pipeline.
-
-### NLP Early-Warning Framework
-
-**Location**: `notebooks/NLP_Early_Warning_Framework.ipynb`
-
-Will detect emerging safety issues from complaint narratives. Not yet hardened into pipeline.
+- All preprocessing stays in one file so cleaning, collapse, and text sidecar logic share the same audited intermediate state in memory
+- Intermediate handoff parquets such as component-row staging files are intentionally not persisted
+- The troubleshooting CSVs are optional diagnostics only and are not part of the default modeling or reporting contract
 
 ---
 
-## Shared Helpers
+## Stage 3: Official Modeling
 
-**Location**: `src/modeling/common/helpers.py`
+**Files**
 
-Consolidated module (merged from `core.py` + `multilabel.py`) containing:
+- `src/modeling/component_single_text_calibrated.py`
+- `src/modeling/component_multi_routing.py`
+- `src/modeling/common/helpers.py`
+- `src/modeling/common/text_fusion.py`
 
-- **Constants**: `STATE_REGION_MAP`, `VEHICLE_AGE_BUCKETS`, feature definitions, split policies
-- **Feature Preparation**: `add_requested_case_features`, `derive_vehicle_age_features`, `derive_state_region`
-- **Data Splitting**: `split_single_label_cases_by_mode`, `split_multi_label_cases_by_mode`
-- **Model Building**: `build_catboost_model`, `fit_catboost_with_external_selection`
-- **Scoring & Metrics**: `score_multiclass_from_proba`, `build_multiclass_calibration_df`
-- **Multilabel Utilities**: `apply_multilabel_threshold`, `select_multilabel_threshold`
-- **Text Fusion**: Accessed via `src/modeling/common/text_fusion.py`
+### Single-label official model
+
+**Reads**
+
+- `data/processed/odi_component_single_label_cases.parquet`
+- `data/processed/odi_component_text_sidecar.parquet`
+
+**Writes**
+
+- `data/outputs/component_single_label_official_manifest.json`
+- `data/outputs/component_single_label_official_select_grid.csv`
+- `data/outputs/component_single_label_official_holdout.csv`
+- `data/outputs/component_single_label_official_class_metrics.csv`
+- `data/outputs/component_single_label_official_confusion_major.csv`
+- `data/outputs/component_single_label_official_calibration.csv`
+
+### Multi-label official model
+
+**Reads**
+
+- `data/processed/odi_component_multilabel_cases.parquet`
+
+**Writes**
+
+- `data/outputs/component_multilabel_official_manifest.json`
+- `data/outputs/component_multilabel_official_split_summary.csv`
+- `data/outputs/component_multilabel_official_metrics.csv`
+- `data/outputs/component_multilabel_official_label_metrics.csv`
+
+**Notes**
+
+- The official single-label model remains the calibrated late-fusion text plus structured model
+- The official multi-label model remains the structured CatBoost routing model
+- Archived experiments and their helpers live under `notebooks/archive/`
 
 ---
 
-## File Structure Summary
+## Stage 4: Reporting
+
+**Files**
+
+- `src/reporting/component_visuals.py`
+- `src/reporting/update_component_readme.py`
+
+**Reads**
+
+- Official Stage 3 model artifacts in `data/outputs/`
+- `data/outputs/component_textwave2b_calibration_manifest.json` for the single-label lift figure
+
+**Writes**
+
+- `docs/figures/component_models/*.png`
+- `docs/figures/component_models/component_model_figure_index.csv`
+- `data/outputs/component_official_benchmark_summary.csv`
+- `data/outputs/component_official_benchmark_summary.json`
+- Updated `README.md` benchmark block
+
+**Notes**
+
+- The Wave 2b calibration manifest remains a required reporting input for the single-label lift visual
+- README publishing is driven only by the official single-label and multi-label manifests
+
+---
+
+## Current File Layout
 
 ```txt
 src/
-├── config/                      # Configuration & constants
-│   ├── paths.py
-│   ├── constants.py
-│   ├── contracts.py             # Output artifact names
-│   └── settings.py
-├── data/                        # Data ingestion
-│   ├── ingest_odi.py
-│   ├── ingest_recalls.py
-│   ├── io_utils.py
-│   └── schema_checks.py
-├── preprocessing/               # Stage 2: Unified preprocessing
-│   └── clean_complaints.py      # Consolidated: cleaning + case collapse + text features
-├── modeling/                    # Stage 3: Official models
-│   ├── component_single_text_calibrated.py
-│   ├── component_multi_routing.py
-│   └── common/                  # Shared helpers
-│       ├── helpers.py           # Consolidated core + multilabel
-│       └──  text_fusion.py      # Text feature fusion workflows
-│   └──official/
-└── reporting/                   # Stage 4: Reporting
-    ├── component_visuals.py
-    └── update_component_readme.py
+|-- config/
+|   |-- constants.py
+|   |-- contracts.py
+|   |-- paths.py
+|   `-- settings.py
+|-- data/
+|   |-- ingest_odi.py
+|   |-- ingest_recalls.py
+|   |-- io_utils.py
+|   `-- schema_checks.py
+|-- preprocessing/
+|   `-- clean_complaints.py
+|-- modeling/
+|   |-- component_single_text_calibrated.py
+|   |-- component_multi_routing.py
+|   `-- common/
+|       |-- helpers.py
+|       `-- text_fusion.py
+`-- reporting/
+    |-- component_visuals.py
+    `-- update_component_readme.py
 ```
 
 ---
 
-## Output Artifacts
-
-### Preprocessing Outputs (Stage 2, in `data/processed/`)
-
-**Cleaned Data Tables**:
-
-- `odi_complaints_cleaned.parquet` (core cleaned complaint records)
-- `odi_component_single_label_cases.parquet` (single-label cases for modeling)
-- `odi_component_multilabel_cases.parquet` (multi-label cases for modeling)
-- `odi_component_text_sidecar.parquet` (NLP features)
-
-**Optional Diagnostic CSVs** (with `--summary` flag):
-
-- `clean_complaints_summary.csv`
-- `clean_complaints_source_era_drift.csv`
-- `collapse_components_summary.csv`
-- `collapse_components_conflicts.csv`
-- `component_target_scope_summary.csv`
-- `component_target_group_summary.csv`
-- `component_text_sidecar_conflicts.csv`
-- `component_text_overlap_report.csv`
-
-### Model Outputs (Stage 3, in `data/outputs/`)
-
-**Official Component Model Results**:
-
-- `component_single_label_official_manifest.json`
-- `component_single_label_official_class_metrics.csv`
-- `component_single_label_official_confusion_major.csv`
-- `component_single_label_official_calibration.csv`
-- `component_single_label_official_holdout.json`
-- `component_multilabel_official_manifest.json`
-- `component_multilabel_official_metrics.csv`
-- `component_multilabel_official_label_metrics.csv`
-
-### Archived Outputs
-
-Wave 1/2 experiment CSVs and CatBoost intermediate files were removed during consolidation. Experiment logic preserved in `notebooks/archive/` for reference.
-
----
-
-## Execution
-
-Run pipeline stages sequentially:
+## Execution Order
 
 ```bash
-# Stage 1: Ingest
 python -m src.data.ingest_odi
-
-# Stage 2: Unified preprocessing (cleaning, case collapse, text features)
-python -m src.preprocessing.clean_complaints [--summary]
-
-# Stage 3: Train official models
+python -m src.preprocessing.clean_complaints
 python -m src.modeling.component_single_text_calibrated
 python -m src.modeling.component_multi_routing
-
-# Stage 4: Report
 python -m src.reporting.component_visuals
 python -m src.reporting.update_component_readme
 ```
 
-**Note**: Stage 2 now runs all preprocessing (cleaning, collapse, text) in a single consolidated script. The `--summary` flag enables optional diagnostic CSVs for validation and reporting.
-
----
-
-## Notes
-
-- All raw data in `data/raw/` is treated as immutable
-- Processed outputs are reproducible from pipeline code and raw data
-- Model hyperparameters are documented in official model files
-- Time-aware validation splits prevent leakage (train: 2020–2024, valid: 2025, holdout: 2026)
-- **Consolidation (April 2026)**: Preprocessing unified into single script; eliminated ~2.6 GB of intermediate parquets; merged duplicate code modules (`core.py` + `multilabel.py` → `helpers.py`). See `CONSOLIDATION_COMPLETE.md` for full details.
+Use `python -m src.preprocessing.clean_complaints --summary` only when the troubleshooting CSVs are needed.

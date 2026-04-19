@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pandas as pd
 
 from src.config.paths import OUTPUTS_DIR
@@ -6,6 +9,12 @@ from src.modeling.common.helpers import fit_catboost_with_external_selection
 
 def log_line(message=''):
     print(message, flush=True)
+
+
+def load_json(path):
+    path = Path(path)
+    with path.open('r', encoding='utf-8') as handle:
+        return json.load(handle)
 
 
 def evaluate_params_across_seeds(train_df, valid_df, feature_info, params, task_type, devices, seed_list, verbose, selection_eval_period=1, progress_label=None):
@@ -70,6 +79,8 @@ LOCKED_SINGLE_CALIBRATION = OUTPUTS_DIR / 'component_single_label_holdout_calibr
 LOCKED_MULTI_METRICS = OUTPUTS_DIR / 'component_multilabel_metrics.csv'
 LOCKED_MULTI_MANIFEST = OUTPUTS_DIR / 'component_multilabel_manifest.json'
 
+FEATURE_WAVE1_GLOBAL_MANIFEST_NAME = 'component_featurewave1_manifest.json'
+FEATURE_WAVE1_TASK = 'feature_wave1'
 GLOBAL_MANIFEST_NAME = 'component_textwave2_manifest.json'
 FEATUREWAVE_TASK = 'text_wave2'
 
