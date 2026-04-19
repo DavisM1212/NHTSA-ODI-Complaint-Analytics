@@ -7,9 +7,9 @@ from src.preprocessing.clean_complaints import (
     build_conflict_report,
     build_overlap_report,
     build_source_era_drift,
-    clean_complaints,
     is_placeholder_text,
     select_best_text_rows,
+    select_clean_columns,
 )
 
 
@@ -64,7 +64,7 @@ def test_clean_complaints_keeps_shared_columns_but_moves_audit_flags_out():
     row_b['faildate'] = '2024-12-25'
 
     work_df = build_cleaning_work(pd.DataFrame([row_a, row_b]))
-    cleaned = clean_complaints(pd.DataFrame([row_a, row_b]))
+    cleaned = select_clean_columns(work_df)
     audit_df = build_cleaning_audit(work_df)
 
     assert 'source_zip' in cleaned.columns

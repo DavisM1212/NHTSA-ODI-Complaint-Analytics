@@ -1,7 +1,5 @@
 import pandas as pd
 
-from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR
-
 # Many of these are optional for extra reporting and audit outputs, but defining
 # them here is consistent. The code producing them is generally commented out to
 # avoid bloat, but they can be easily re-enabled if needed.
@@ -18,7 +16,14 @@ COMPONENT_TEXT_SIDECAR_STEM = 'odi_component_text_sidecar'
 
 
 # -----------------------------------------------------------------------------
-# Summary and audit outputs
+# Ingest manifests
+# -----------------------------------------------------------------------------
+INGEST_ODI_MANIFEST_NAME = 'ingest_odi_manifest.csv'
+INGEST_RECALLS_EXTRACT_MANIFEST_NAME = 'ingest_recalls_extract_manifest.csv'
+
+
+# -----------------------------------------------------------------------------
+# Optional preprocessing summaries
 # -----------------------------------------------------------------------------
 CLEANING_SUMMARY_NAME = 'clean_complaints_summary.csv'
 CLEANING_DRIFT_NAME = 'clean_complaints_source_era_drift.csv'
@@ -42,6 +47,7 @@ COMPONENT_OFFICIAL_SUMMARY_CSV = 'component_official_benchmark_summary.csv'
 COMPONENT_OFFICIAL_SUMMARY_JSON = 'component_official_benchmark_summary.json'
 
 COMPONENT_SINGLE_OFFICIAL_HOLDOUT = 'component_single_label_official_holdout.csv'
+COMPONENT_SINGLE_OFFICIAL_SELECT_GRID = 'component_single_label_official_select_grid.csv'
 COMPONENT_SINGLE_OFFICIAL_CLASS = 'component_single_label_official_class_metrics.csv'
 COMPONENT_SINGLE_OFFICIAL_CONFUSION = 'component_single_label_official_confusion_major.csv'
 COMPONENT_SINGLE_OFFICIAL_CALIBRATION = 'component_single_label_official_calibration.csv'
@@ -100,18 +106,6 @@ SPLIT_POLICIES = {
         'holdout_policy': '2026 holdout untouched during feature-family screening and promotion'
     }
 }
-
-
-# -----------------------------------------------------------------------------
-# Helper paths
-# -----------------------------------------------------------------------------
-def processed_stem_path(stem):
-    return PROCESSED_DATA_DIR / stem
-
-
-def output_path(name):
-    return OUTPUTS_DIR / name
-
 
 def get_split_policy(split_mode=BENCHMARK_SPLIT_MODE):
     if split_mode not in SPLIT_POLICIES:

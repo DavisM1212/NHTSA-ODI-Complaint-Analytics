@@ -1,7 +1,6 @@
 import argparse
 import re
 import sys
-from pathlib import Path
 
 import pandas as pd
 
@@ -28,11 +27,6 @@ from src.config.contracts import (
 )
 from src.config.paths import OUTPUTS_DIR, PROCESSED_DATA_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_dataframe
-from src.modeling.common.helpers import (
-    STATE_REGION_MAP,
-    VEHICLE_AGE_BUCKETS,
-    VEHICLE_AGE_LABELS,
-)
 
 # -----------------------------------------------------------------------------
 # Output names
@@ -848,13 +842,6 @@ def build_cleaning_work(df):
         primary_name='severity_primary_row_flag',
         broad_name='severity_broad_row_flag'
     )
-
-
-def clean_complaints(df):
-    work = build_cleaning_work(df)
-    return select_clean_columns(work)
-
-
 # -----------------------------------------------------------------------------
 # Task tables
 # -----------------------------------------------------------------------------
@@ -1009,91 +996,6 @@ def collapse_case_features(case_rows, target_mode):
         primary_name='severity_primary_flag',
         broad_name='severity_broad_flag'
     )
-
-
-def build_sort_keys(case_df):
-    work = case_df.copy()
-    work['__odino_num'] = pd.to_numeric(work['odino'], errors='coerce')
-    return work.sort_values(
-        ['ldate', '__odino_num', 'odino'],
-        na_position='last'
-    ).reset_index(drop=True)
-
-
-def add_vehicle_age_fields(case_df):
-    case_df = case_df.copy()
-    case_df['complaint_year'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.year.astype('Int64')
-    case_df['complaint_month'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.month.astype('Int64')
-    case_df['complaint_quarter'] = pd.to_datetime(case_df['ldate'], errors='coerce').dt.quarter.astype('Int64')
-
-    model_year = pd.to_numeric(case_df['yeartxt'], errors='coerce')
-    vehicle_age = case_df['complaint_year'].astype('Float64') - model_year.astype('Float64')
-    vehicle_age = vehicle_age.where(vehicle_age.ge(0))
-    case_df['vehicle_age_years'] = vehicle_age
-    age_bucket = pd.cut(
-        vehicle_age,
-        bins=VEHICLE_AGE_BUCKETS,
-        labels=VEHICLE_AGE_LABELS,
-        include_lowest=True
-    )
-    case_df['vehicle_age_bucket'] = age_bucket.astype('string')
-    return case_df
-
-
-def add_state_region(case_df):
-    case_df = case_df.copy()
-    state = case_df['state'].astype('string').str.upper()
-    case_df['state_region'] = state.map(STATE_REGION_MAP).fillna('UNKNOWN').astype(str)
-    return case_df
-
-
-def add_prior_history_features(case_df):
-    work = build_sort_keys(case_df)
-    work['__event_day'] = pd.to_datetime(work['ldate'], errors='coerce').dt.normalize()
-    work['__severity_int'] = work['severity_broad_flag'].fillna(False).astype(int)
-
-    history_specs = [
-        ('mfr_name', 'prior_cmpl_mfr_all', 'prior_severity_share_mfr_all'),
-        (['maketxt', 'modeltxt'], 'prior_cmpl_make_model_all', 'prior_severity_share_make_model_all'),
-        (
-            ['maketxt', 'modeltxt', 'yeartxt'],
-            'prior_cmpl_make_model_year_all',
-            'prior_severity_share_make_model_year_all'
-        )
-    ]
-
-    for key_cols, count_name, share_name in history_specs:
-        key_cols = [key_cols] if isinstance(key_cols, str) else list(key_cols)
-        daily_df = (
-            work.groupby(key_cols + ['__event_day'], dropna=False, sort=False)
-            .agg(
-                day_case_count=('odino', 'size'),
-                day_severity_count=('__severity_int', 'sum')
-            )
-            .reset_index()
-        )
-        grouped = daily_df.groupby(key_cols, sort=False, dropna=False)
-        daily_df['__prior_case_count'] = grouped['day_case_count'].cumsum() - daily_df['day_case_count']
-        daily_df['__prior_severity_count'] = grouped['day_severity_count'].cumsum() - daily_df['day_severity_count']
-        daily_df[count_name] = daily_df['__prior_case_count'].astype('Int64')
-        prior_share = daily_df['__prior_severity_count'].astype(float) / daily_df['__prior_case_count'].replace(0, pd.NA)
-        daily_df[share_name] = pd.Series(prior_share, index=daily_df.index).astype('Float64')
-        work = work.merge(
-            daily_df[key_cols + ['__event_day', count_name, share_name]],
-            on=key_cols + ['__event_day'],
-            how='left',
-            validate='many_to_one'
-        )
-
-    return work.drop(columns=['__odino_num', '__event_day', '__severity_int'])
-
-
-def add_wave1_case_features(case_df):
-    case_df = add_vehicle_age_fields(case_df)
-    case_df = add_state_region(case_df)
-    return add_prior_history_features(case_df)
-
-
 def build_case_tables(component_df):
     keep_df = component_df.loc[
         component_df['component_keep_flag'].fillna(False) & component_df['odino'].notna()

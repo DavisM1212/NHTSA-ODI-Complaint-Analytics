@@ -4,7 +4,7 @@ Professional-grade data science workspace for analyzing National Highway Traffic
 
 This repository is designed for a DSBA 6156 (Machine Learning) group project. The current setup emphasizes:
 
-- low-friction onboarding for teammates
+- low-friction onboarding
 - consistent project structure
 - easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
@@ -38,10 +38,8 @@ The repo has a stable, production-ready pipeline for component-level complaint r
 
 ### Stage 2: Cleaning + Features
 
-- `src/preprocessing/clean_complaints.py`: Conservative cleaning, severity flagging, date validation
-- `src/features/collapse_components.py`: Component row collapsing, single/multi-label case tables
-- `src/features/component_text_sidecar.py`: Text feature engineering for NLP tasks
-- Outputs: Cleaned complaints, component case tables, text sidecar
+- `src/preprocessing/clean_complaints.py`: Consolidated cleaning, severity table creation, component case collapse, and text sidecar creation
+- Outputs: cleaned complaints, severity cases, single-label cases, multi-label cases, and text sidecar
 
 ### Stage 3: Main Models
 
@@ -54,6 +52,7 @@ The repo has a stable, production-ready pipeline for component-level complaint r
 - `src/reporting/component_visuals.py`: Generate confusion matrices, calibration plots
 - `src/reporting/update_component_readme.py`: Update README with latest results
 - Outputs: `docs/figures/component_models/*.png`
+- Reporting keeps the Wave 2b calibration manifest as an input for the single-label lift figure
 
 ### Future Work (WIP in notebooks)
 
@@ -467,38 +466,15 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `src/preprocessing/`
 
 - Cleaning and transformation logic
-- `clean_complaints.py`: conservative master cleaning plus task-specific cleaned outputs
-
-`src/features/`
-
-- Feature engineering code for ML/NLP/time-based models
-- `collapse_components.py`: builds the single-label benchmark case table and the broader multi-label routing table
-- `component_text_sidecar.py`: builds one narrative text sidecar row per complaint for component text modeling
+- `clean_complaints.py`: conservative master cleaning plus the final persisted preprocessing outputs used by notebooks and models
 
 `src/modeling/`
 
-- Model training logic (baselines first, then stronger models)
-- `component_catboost.py`: structured single-label benchmark with baselines, holdout scoring, calibration, and manifests
-- `tune_component_catboost.py`: single-label feature-set selection plus focused CatBoost tuning
-- `component_multilabel.py`: multi-label routing benchmark for the full kept-case target
-- `component_text_wave2.py`: Wave 2 text-feature component modeling experiment path
-- `component_text_wave2b_calibration.py`: calibrated single-label component model promoted as the official single-label benchmark
-
-`src/evaluation/`
-
-- Metrics, diagnostics, subgroup checks, and error analysis
-
-`src/nlp/`
-
-- Text/narrative preprocessing and NLP modeling utilities
-
-`src/signals/`
-
-- Early-warning signal, trend, and anomaly detection logic
-
-`src/integration/`
-
-- Cross-dataset joins and integration logic (for example complaints + recalls)
+- Official model training logic plus shared helpers
+- `component_single_text_calibrated.py`: official calibrated single-label component benchmark
+- `component_multi_routing.py`: official multi-label routing benchmark
+- `common/helpers.py`: shared structured-model and split helpers
+- `common/text_fusion.py`: shared text and late-fusion helpers used by the official single-label path
 
 `src/reporting/`
 

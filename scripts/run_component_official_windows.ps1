@@ -5,7 +5,6 @@ param(
     [ValidateSet("parquet", "csv")]
     [string]$OutputFormat = "parquet",
     [switch]$OverwriteExtracted,
-    [switch]$NoCombine,
     [switch]$SkipIngest,
     [switch]$SkipVisuals
 )
@@ -56,9 +55,6 @@ if (-not $SkipIngest) {
     $ingestArgs = @("--output-format", $OutputFormat)
     if ($OverwriteExtracted) {
         $ingestArgs += "--overwrite-extracted"
-    }
-    if ($NoCombine) {
-        $ingestArgs += "--no-combine"
     }
     Invoke-Module "src.data.ingest_odi" $ingestArgs
 }

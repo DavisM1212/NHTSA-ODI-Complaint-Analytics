@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import settings
+from src.config.contracts import INGEST_RECALLS_EXTRACT_MANIFEST_NAME
 from src.config.paths import (
     EXTRACTED_DATA_DIR,
     OUTPUTS_DIR,
@@ -59,7 +60,7 @@ def main():
 
     if manifest_rows:
         manifest_df = pd.DataFrame(manifest_rows)
-        manifest_path = OUTPUTS_DIR / settings.RECALL_EXTRACT_MANIFEST_NAME
+        manifest_path = OUTPUTS_DIR / INGEST_RECALLS_EXTRACT_MANIFEST_NAME
         manifest_df.to_csv(manifest_path, index=False)
         print(f"[write] {manifest_path}")
 

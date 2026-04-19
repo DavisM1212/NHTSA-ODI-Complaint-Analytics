@@ -217,21 +217,6 @@ def fit_logistic_holdout_stage(dev_df, holdout_df, y_dev, feature_info, random_s
     }
 
 
-def select_official_model(metric_df):
-    valid_rows = metric_df.loc[
-        metric_df['stage'].eq('selection_train_valid')
-        & metric_df['split'].eq('valid_2025')
-    ].copy()
-    if valid_rows.empty:
-        raise ValueError('No validation rows available for model selection')
-
-    valid_rows = valid_rows.sort_values(
-        ['macro_f1', 'micro_f1', 'recall_at_3', 'precision_at_3'],
-        ascending=False
-    ).reset_index(drop=True)
-    return valid_rows.iloc[0]
-
-
 # -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------

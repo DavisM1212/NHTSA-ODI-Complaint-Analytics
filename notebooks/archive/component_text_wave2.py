@@ -3,13 +3,14 @@ import sys
 
 import numpy as np
 import pandas as pd
+import tuning_shared as tune
 from sklearn.metrics import precision_recall_fscore_support
 
 import src.modeling.common.text_fusion as txt_fus
 from src.config import settings
+from src.config.contracts import COMPONENT_TEXT_SIDECAR_STEM
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import load_frame, write_json
-from src.features.component_text_sidecar import SIDECAR_STEM
 from src.modeling.common.helpers import (
     FEATURE_WAVE1_SPLIT_MODE,
     MULTI_INPUT_STEM,
@@ -53,13 +54,13 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
     select_rows = []
     holdout_rows = []
     class_df = pd.DataFrame()
-    confusion_df = txt_fus.empty_single_confusion_df()
-    calibration_df = txt_fus.empty_single_calibration_df()
+    confusion_df = tune.empty_single_confusion_df()
+    calibration_df = tune.empty_single_calibration_df()
     overlap_metrics = []
     completed_stages = []
 
     raw_df, input_path = load_frame(SINGLE_INPUT_STEM, input_path=args.single_input_path)
-    sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
+    sidecar_df, text_sidecar_path = load_frame(COMPONENT_TEXT_SIDECAR_STEM, input_path=args.text_sidecar_path)
     case_df = prep_single_label_cases(raw_df, structured_feature_info['feature_cols'])
     case_df = txt_fus.merge_text_sidecar(case_df, sidecar_df)
     split_parts = split_single_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)
@@ -89,7 +90,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
                 'split_df': split_parts['split_df'],
                 'screen_df': pd.DataFrame(screen_rows),
                 'select_df': pd.DataFrame(select_rows),
-                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_single_holdout_df(),
+                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else tune.empty_single_holdout_df(),
                 'class_df': class_df,
                 'confusion_df': confusion_df,
                 'calibration_df': calibration_df,
@@ -587,7 +588,7 @@ def run_single_wave(args, structured_feature_info, locked_single_select_row, loc
         'split_df': split_parts['split_df'],
         'screen_df': pd.DataFrame(screen_rows),
         'select_df': select_df_all,
-        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_single_holdout_df(),
+        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else tune.empty_single_holdout_df(),
         'class_df': class_df,
         'confusion_df': confusion_df,
         'calibration_df': calibration_df,
@@ -615,7 +616,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
     completed_stages = []
 
     raw_df, input_path = load_frame(MULTI_INPUT_STEM, input_path=args.multi_input_path)
-    sidecar_df, text_sidecar_path = load_frame(SIDECAR_STEM, input_path=args.text_sidecar_path)
+    sidecar_df, text_sidecar_path = load_frame(COMPONENT_TEXT_SIDECAR_STEM, input_path=args.text_sidecar_path)
     case_df = prep_multi_label_cases(raw_df, structured_feature_info['feature_cols'])
     case_df = txt_fus.merge_text_sidecar(case_df, sidecar_df)
     split_parts = split_multi_label_cases_by_mode(case_df, split_mode=FEATURE_WAVE1_SPLIT_MODE)
@@ -644,7 +645,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
                 'split_df': split_parts['split_df'],
                 'screen_df': pd.DataFrame(screen_rows),
                 'select_df': pd.DataFrame(select_rows),
-                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_multi_holdout_df(),
+                'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else tune.empty_multi_holdout_df(),
                 'label_df': label_df,
                 'selected_family': selected_family,
                 'final_linear_model': args.final_linear_model,
@@ -1141,7 +1142,7 @@ def run_multi_wave(args, structured_feature_info, locked_multi_select_row, locke
         'split_df': split_parts['split_df'],
         'screen_df': pd.DataFrame(screen_rows),
         'select_df': select_df_all,
-        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else txt_fus.empty_multi_holdout_df(),
+        'holdout_df': pd.DataFrame(holdout_rows) if holdout_rows else tune.empty_multi_holdout_df(),
         'label_df': label_df,
         'selected_family': selected_family,
         'final_linear_model': args.final_linear_model,
@@ -1205,31 +1206,31 @@ def main():
         raise ValueError('Nothing to do: both single and multi tasks were skipped')
 
     structured_feature_info = feature_manifest(txt_fus.STRUCTURED_FEATURE_SET)
-    locked_single_select_row = txt_fus.read_locked_single_select_baseline()
-    locked_multi_select_row = txt_fus.read_locked_multi_select_baseline()
-    locked_single_manifest = txt_fus.load_json(txt_fus.LOCKED_SINGLE_MANIFEST)
-    locked_multi_manifest = txt_fus.load_json(txt_fus.LOCKED_MULTI_MANIFEST)
-    locked_single_selection = txt_fus.load_json(txt_fus.LOCKED_SINGLE_SELECTION)
-    locked_single_ece = txt_fus.read_locked_single_ece()
+    locked_single_select_row = tune.read_locked_single_select_baseline()
+    locked_multi_select_row = tune.read_locked_multi_select_baseline()
+    locked_single_manifest = txt_fus.load_json(tune.LOCKED_SINGLE_MANIFEST)
+    locked_multi_manifest = txt_fus.load_json(tune.LOCKED_MULTI_MANIFEST)
+    locked_single_selection = txt_fus.load_json(tune.LOCKED_SINGLE_SELECTION)
+    locked_single_ece = tune.read_locked_single_ece()
 
     manifest = {
-        'artifact_role': txt_fus.FEATUREWAVE_TASK,
+        'artifact_role': tune.FEATUREWAVE_TASK,
         'feature_wave': 2,
         'split_mode': FEATURE_WAVE1_SPLIT_MODE,
         'public_benchmark_locked': True,
         'run_status': 'running',
         'structured_companion_feature_set': txt_fus.STRUCTURED_FEATURE_SET,
         'final_linear_model': args.final_linear_model,
-        'text_config': txt_fus.TEXT_CONFIG,
+        'text_config': tune.TEXT_CONFIG,
         'last_checkpoint': None,
         'tasks': {}
     }
-    write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
+    write_json(manifest, OUTPUTS_DIR / tune.GLOBAL_MANIFEST_NAME)
 
     def checkpoint_single(stage_name, result):
         # CSV wave 2 artifacts deleted per bloat reduction
         # txt_fus.write_single_outputs(result)
-        manifest['tasks']['single_label'] = txt_fus.build_single_manifest_entry(
+        manifest['tasks']['single_label'] = tune.build_single_manifest_entry(
             result,
             locked_single_select_row,
             locked_single_manifest['official_holdout_metrics'],
@@ -1239,12 +1240,12 @@ def main():
             'task': 'single_label',
             'stage': stage_name
         }
-        write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
+        write_json(manifest, OUTPUTS_DIR / tune.GLOBAL_MANIFEST_NAME)
 
     def checkpoint_multi(stage_name, result):
         # CSV wave 2 artifacts deleted per bloat reduction
         # txt_fus.write_multi_outputs(result)
-        manifest['tasks']['multi_label'] = txt_fus.build_multi_manifest_entry(
+        manifest['tasks']['multi_label'] = tune.build_multi_manifest_entry(
             result,
             locked_multi_select_row,
             locked_multi_manifest['official_holdout_metrics']
@@ -1253,7 +1254,7 @@ def main():
             'task': 'multi_label',
             'stage': stage_name
         }
-        write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
+        write_json(manifest, OUTPUTS_DIR / tune.GLOBAL_MANIFEST_NAME)
 
     try:
         if not args.skip_single:
@@ -1269,7 +1270,7 @@ def main():
             )
             # CSV wave 2 artifacts deleted per bloat reduction
             # txt_fus.write_single_outputs(single_result)
-            manifest['tasks']['single_label'] = txt_fus.build_single_manifest_entry(
+            manifest['tasks']['single_label'] = tune.build_single_manifest_entry(
                 single_result,
                 locked_single_select_row,
                 locked_single_manifest['official_holdout_metrics'],
@@ -1287,7 +1288,7 @@ def main():
             )
             # CSV wave 2 artifacts deleted per bloat reduction
             # txt_fus.write_multi_outputs(multi_result)
-            manifest['tasks']['multi_label'] = txt_fus.build_multi_manifest_entry(
+            manifest['tasks']['multi_label'] = tune.build_multi_manifest_entry(
                 multi_result,
                 locked_multi_select_row,
                 locked_multi_manifest['official_holdout_metrics']
@@ -1295,12 +1296,12 @@ def main():
     except Exception as exc:
         manifest['run_status'] = 'failed'
         manifest['error'] = str(exc)
-        write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
+        write_json(manifest, OUTPUTS_DIR / tune.GLOBAL_MANIFEST_NAME)
         raise
 
     manifest['run_status'] = 'completed'
-    write_json(manifest, OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME)
-    print(f'[write] {OUTPUTS_DIR / txt_fus.GLOBAL_MANIFEST_NAME}')
+    write_json(manifest, OUTPUTS_DIR / tune.GLOBAL_MANIFEST_NAME)
+    print(f'[write] {OUTPUTS_DIR / tune.GLOBAL_MANIFEST_NAME}')
     print('[done] Component text wave 2 finished')
     return 0
 

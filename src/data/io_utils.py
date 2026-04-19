@@ -1,5 +1,4 @@
 import json
-import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -14,13 +13,6 @@ from src.config.paths import PROCESSED_DATA_DIR
 # -----------------------------------------------------------------------------
 # Filesystem helpers
 # -----------------------------------------------------------------------------
-def sanitize_name(value):
-    text = str(value).strip()
-    text = re.sub(r"[^\w\-]+", "_", text)
-    text = re.sub(r"_+", "_", text)
-    return text.strip("_") or "dataset"
-
-
 def discover_zip_files(raw_dir, include_terms):
     include_terms = [term.lower() for term in include_terms]
     zip_paths = []
@@ -185,8 +177,6 @@ def write_dataframe(df, output_stem, prefer_parquet=True):
 
     if prefer_parquet:
         try:
-            import pyarrow as pa
-
             output_path = output_stem.with_suffix(".parquet")
             df.to_parquet(output_path, index=False)
             return output_path

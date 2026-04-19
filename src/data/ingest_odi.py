@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.config import settings
 from src.config.constants import EXPECTED_COMPLAINT_ZIP_NAMES
+from src.config.contracts import COMBINED_COMPLAINTS_STEM, INGEST_ODI_MANIFEST_NAME
 from src.config.paths import (
     EXTRACTED_DATA_DIR,
     OUTPUTS_DIR,
@@ -48,7 +49,7 @@ def tabular_candidates(extracted_paths):
     return sorted(files)
 
 
-def process_table_file(table_path, source_zip_name, output_format):
+def process_table_file(table_path, source_zip_name):
     complaint_columns = get_schema_columns("complaints")
     df = read_tabular_file(
         table_path,
@@ -75,7 +76,7 @@ def process_table_file(table_path, source_zip_name, output_format):
     return df, manifest_row
 
 
-def process_zip_file(zip_path, overwrite_extracted=False, output_format="parquet"):
+def process_zip_file(zip_path, overwrite_extracted=False):
     zip_path = Path(zip_path)
     extract_dir = EXTRACTED_DATA_DIR
     print("")
@@ -94,7 +95,7 @@ def process_zip_file(zip_path, overwrite_extracted=False, output_format="parquet
     for table_path in candidate_files:
         print(f"[process] {table_path.name}")
         df, manifest_row = process_table_file(
-            table_path, zip_path.name, output_format
+            table_path, zip_path.name
         )
         frames.append(df)
         manifest_rows.append(manifest_row)
@@ -147,15 +148,14 @@ def main():
     for zip_path in zip_files:
         frames, manifest_rows = process_zip_file(
             zip_path,
-            overwrite_extracted=args.overwrite_extracted,
-            output_format=args.output_format
+            overwrite_extracted=args.overwrite_extracted
         )
         all_manifest_rows.extend(manifest_rows)
         all_frames.extend(frames)
 
     if all_manifest_rows:
         manifest_df = pd.DataFrame(all_manifest_rows)
-        manifest_path = OUTPUTS_DIR / settings.INGEST_MANIFEST_NAME
+        manifest_path = OUTPUTS_DIR / INGEST_ODI_MANIFEST_NAME
         manifest_df.to_csv(manifest_path, index=False)
         print("")
         print(f"[write] {manifest_path}")
@@ -165,7 +165,7 @@ def main():
     combined_df = pd.concat(all_frames, ignore_index=True, sort=False)
     combined_output = write_dataframe(
         combined_df,
-        PROCESSED_DATA_DIR / settings.COMBINED_COMPLAINT_OUTPUT_STEM,
+        PROCESSED_DATA_DIR / COMBINED_COMPLAINTS_STEM,
         prefer_parquet=args.output_format == "parquet"
     )
     print(f"[write] {combined_output}")

@@ -4,22 +4,18 @@ import sys
 import optuna
 import pandas as pd
 
+from src.config.contracts import TRAIN_END, VALID_END
 from src.config.paths import OUTPUTS_DIR, ensure_project_directories
 from src.data.io_utils import json_ready, load_frame, write_json
 from src.modeling.common.helpers import (
     BENCHMARK_FEATURE_SET_NAMES,
     DEFAULT_SELECTION_SEEDS,
     SINGLE_INPUT_STEM,
-    TRAIN_END,
-    VALID_END,
     feature_manifest,
     fit_catboost_with_external_selection,
     prep_single_label_cases,
     split_single_label_cases,
 )
-
-# Workflow owner for locked single-label CatBoost tuning
-# Produces the selection manifest used by component_catboost.py
 
 # -----------------------------------------------------------------------------
 # Output names

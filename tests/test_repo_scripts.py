@@ -16,8 +16,7 @@ def test_official_runner_scripts_call_the_new_pipeline_modules():
 
     for text in [windows_text, mac_text]:
         assert 'src.preprocessing.clean_complaints' in text
-        assert 'src.features.collapse_components' in text
-        assert 'src.features.component_text_sidecar' in text
         assert 'src.modeling.component_single_text_calibrated' in text
         assert 'src.modeling.component_multi_routing' in text
         assert 'src.reporting.update_component_readme' in text
+        assert 'src.reporting.component_visuals' in text

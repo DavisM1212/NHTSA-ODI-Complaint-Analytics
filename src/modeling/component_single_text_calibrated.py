@@ -13,6 +13,7 @@ from src.config.contracts import (
     COMPONENT_SINGLE_OFFICIAL_CONFUSION,
     COMPONENT_SINGLE_OFFICIAL_HOLDOUT,
     COMPONENT_SINGLE_OFFICIAL_MANIFEST,
+    COMPONENT_SINGLE_OFFICIAL_SELECT_GRID,
     COMPONENT_TEXT_SIDECAR_STEM,
     FEATURE_WAVE1_SPLIT_MODE,
 )
@@ -37,6 +38,7 @@ from src.modeling.common.text_fusion import (
     STRUCTURED_FEATURE_SET,
     TEXT_ONLY_FAMILY,
     apply_single_fusion_weight,
+    build_overlap_mask,
     build_single_overlap_rows,
     build_single_row,
     fit_single_structured_family,
@@ -46,7 +48,7 @@ from src.modeling.common.text_fusion import (
 )
 
 GLOBAL_MANIFEST_NAME = COMPONENT_SINGLE_OFFICIAL_MANIFEST
-SELECT_GRID_NAME = 'component_single_label_official_select_grid.csv'
+SELECT_GRID_NAME = COMPONENT_SINGLE_OFFICIAL_SELECT_GRID
 HOLDOUT_NAME = COMPONENT_SINGLE_OFFICIAL_HOLDOUT
 CALIBRATION_NAME = COMPONENT_SINGLE_OFFICIAL_CALIBRATION
 CLASS_NAME = COMPONENT_SINGLE_OFFICIAL_CLASS
@@ -369,9 +371,10 @@ def main():
         'select_2025',
     )
 
-    overlap_mask = pd.Series(holdout_df['cdescr_model_text']).fillna('').astype(str).isin(
-        set(pd.Series(dev_select_df['cdescr_model_text']).fillna('').astype(str)) - {''}
-    ).to_numpy()
+    overlap_mask = build_overlap_mask(
+        dev_select_df['cdescr_model_text'],
+        holdout_df['cdescr_model_text']
+    )
     holdout_rows = [uncalibrated_row]
     holdout_rows.extend(
         build_holdout_overlap_rows(

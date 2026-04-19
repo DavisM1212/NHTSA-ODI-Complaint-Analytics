@@ -45,15 +45,15 @@ def test_generate_component_visuals_writes_expected_files():
                 }
             ]
         )
-        with (outputs_dir / 'component_single_label_official_manifest.json').open('w', encoding='utf-8') as handle:
+        with (outputs_dir / 'component_textwave2b_calibration_manifest.json').open('w', encoding='utf-8') as handle:
             json.dump(
                 {
-                    'uncalibrated_holdout_metrics': {
+                    'locked_holdout_baseline': {
                         'macro_f1': 0.70,
                         'top_1_accuracy': 0.80,
                         'top_3_accuracy': 0.92
                     },
-                    'official_holdout_metrics': {
+                    'calibrated_holdout_metrics': {
                         'macro_f1': 0.75,
                         'top_1_accuracy': 0.85,
                         'top_3_accuracy': 0.95
@@ -115,30 +115,10 @@ def test_generate_component_visuals_writes_expected_files():
                 {'model': 'CatBoost MultiLabel', 'component_group': 'BRAKES', 'support': 10, 'precision': 0.3, 'recall': 0.5, 'f1': 0.38}
             ]
         )
-        write_csv(
-            outputs_dir / 'component_target_scope_summary.csv',
-            [
-                {
-                    'scope': 'overall',
-                    'segment': 'single_label_benchmark_cases',
-                    'cases': 70,
-                    'case_share': 0.70,
-                    'severity_broad_rate': 0.08
-                },
-                {
-                    'scope': 'overall',
-                    'segment': 'multi_label_only_cases',
-                    'cases': 30,
-                    'case_share': 0.30,
-                    'severity_broad_rate': 0.11
-                }
-            ]
-        )
-
         result = generate_component_visuals(outputs_dir=outputs_dir, output_dir=figures_dir)
 
         assert result['index_path'].exists()
-        assert len(result['figures']) == 7
+        assert len(result['figures']) == 6
         for row in result['figures']:
             assert (figures_dir / f"{row['figure']}.png").exists()
     finally:

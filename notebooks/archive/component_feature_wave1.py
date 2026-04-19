@@ -46,9 +46,6 @@ from src.modeling.common.helpers import (
     build_metric_row as build_multilabel_metric_row,
 )
 
-# Workflow owner for Wave 1 structured feature-family comparisons
-# Uses locked single-label and multi-label baselines, then writes its own screen/select/holdout artifacts
-
 # -----------------------------------------------------------------------------
 # Output names
 # -----------------------------------------------------------------------------
