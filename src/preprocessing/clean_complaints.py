@@ -489,7 +489,7 @@ PLACEHOLDER_TEXTS = {
 
 
 # -----------------------------------------------------------------------------
-# Small helpers
+# General helpers
 # -----------------------------------------------------------------------------
 def require_columns(df):
     missing = [column for column in REQ_COLS if column not in df.columns]
@@ -775,6 +775,96 @@ def build_source_era_drift(audit_df):
 
 
 # -----------------------------------------------------------------------------
+# Collapse helpers
+# -----------------------------------------------------------------------------
+def collapse_case_features(case_rows, target_mode):
+    case_rows = case_rows.sort_values(['odino', 'cmplid'], na_position='last').copy()
+    grouped = case_rows.groupby('odino', sort=True)
+
+    frames = [grouped.size().rename('component_row_count')]
+    if target_mode == 'single':
+        frames.append(grouped['component_group'].first())
+    elif target_mode == 'multi':
+        frames.append(
+            grouped['component_group']
+            .agg(lambda s: '|'.join(sorted(pd.Series(s.dropna().astype(str).unique()).tolist())))
+            .rename('component_groups')
+        )
+        frames.append(grouped['component_group'].nunique(dropna=True).rename('component_group_count'))
+    elif target_mode != 'base':
+        raise ValueError(f'Unknown target_mode: {target_mode}')
+
+    first_cols = filter_columns(COLLAPSE_FIRST_COLS, case_rows)
+    if first_cols:
+        frames.append(grouped[first_cols].first())
+
+    max_cols = filter_columns(COLLAPSE_MAX_COLS, case_rows)
+    if max_cols:
+        frames.append(grouped[max_cols].max())
+
+    any_flag_cols = filter_columns(COLLAPSE_ANY_FLAG_COLS, case_rows)
+    if any_flag_cols:
+        frames.append(grouped[any_flag_cols].any())
+
+    yn_cols = [column for column in COLLAPSE_YN_COLS if column in case_rows.columns]
+    temp_cols = []
+    for column in yn_cols:
+        yes_col = f'__{column}_yes'
+        present_col = f'__{column}_present'
+        case_rows[yes_col] = case_rows[column].fillna('N').eq('Y')
+        case_rows[present_col] = case_rows[column].notna()
+        temp_cols.extend([yes_col, present_col])
+
+    if temp_cols:
+        frames.append(case_rows.groupby('odino', sort=True)[temp_cols].max())
+
+    case_df = pd.concat(frames, axis=1).reset_index()
+    case_df = reconstruct_yn_cols(case_df, yn_cols)
+    case_df['miles_missing_flag'] = case_df['miles'].isna()
+    case_df['veh_speed_missing_flag'] = case_df['veh_speed'].isna()
+    case_df = add_safe_lag_fields(case_df)
+    return add_severity_flags(
+        case_df,
+        primary_name='severity_primary_flag',
+        broad_name='severity_broad_flag'
+    )
+
+
+# -----------------------------------------------------------------------------
+# Text helpers
+# -----------------------------------------------------------------------------
+def normalize_text(value):
+    if pd.isna(value):
+        return ''
+    return SPACE_RE.sub(' ', str(value).strip())
+
+
+def is_placeholder_text(text):
+    text = normalize_text(text)
+    if not text:
+        return False
+
+    upper = text.upper()
+    if upper in PLACEHOLDER_TEXTS:
+        return True
+
+    return len(text) <= 10 and not bool(ALPHA_RE.search(upper))
+
+
+def build_base_text_rows(clean_df, odino_universe):
+    work = clean_df.loc[
+        clean_df['odino'].isin(odino_universe),
+        ['odino', 'cmplid', 'cdescr', 'source_era', 'ldate']
+    ].copy()
+    work['ldate'] = pd.to_datetime(work['ldate'], errors='coerce')
+    work['cmplid_num'] = pd.to_numeric(work['cmplid'], errors='coerce')
+    work['cdescr_norm'] = work['cdescr'].map(normalize_text)
+    work['cdescr_len'] = work['cdescr_norm'].str.len()
+    work['has_text'] = work['cdescr_norm'].ne('')
+    return work
+
+
+# -----------------------------------------------------------------------------
 # Shared cleaning
 # -----------------------------------------------------------------------------
 def build_cleaning_work(df):
@@ -842,6 +932,8 @@ def build_cleaning_work(df):
         primary_name='severity_primary_row_flag',
         broad_name='severity_broad_row_flag'
     )
+
+
 # -----------------------------------------------------------------------------
 # Task tables
 # -----------------------------------------------------------------------------
@@ -942,153 +1034,6 @@ def build_component_rows(cleaned_df, audit_df):
     return component_df.loc[:, keep_cols].reset_index(drop=True)
 
 
-# -----------------------------------------------------------------------------
-# Collapse helpers
-# -----------------------------------------------------------------------------
-def collapse_case_features(case_rows, target_mode):
-    case_rows = case_rows.sort_values(['odino', 'cmplid'], na_position='last').copy()
-    grouped = case_rows.groupby('odino', sort=True)
-
-    frames = [grouped.size().rename('component_row_count')]
-    if target_mode == 'single':
-        frames.append(grouped['component_group'].first())
-    elif target_mode == 'multi':
-        frames.append(
-            grouped['component_group']
-            .agg(lambda s: '|'.join(sorted(pd.Series(s.dropna().astype(str).unique()).tolist())))
-            .rename('component_groups')
-        )
-        frames.append(grouped['component_group'].nunique(dropna=True).rename('component_group_count'))
-    elif target_mode != 'base':
-        raise ValueError(f'Unknown target_mode: {target_mode}')
-
-    first_cols = filter_columns(COLLAPSE_FIRST_COLS, case_rows)
-    if first_cols:
-        frames.append(grouped[first_cols].first())
-
-    max_cols = filter_columns(COLLAPSE_MAX_COLS, case_rows)
-    if max_cols:
-        frames.append(grouped[max_cols].max())
-
-    any_flag_cols = filter_columns(COLLAPSE_ANY_FLAG_COLS, case_rows)
-    if any_flag_cols:
-        frames.append(grouped[any_flag_cols].any())
-
-    yn_cols = [column for column in COLLAPSE_YN_COLS if column in case_rows.columns]
-    temp_cols = []
-    for column in yn_cols:
-        yes_col = f'__{column}_yes'
-        present_col = f'__{column}_present'
-        case_rows[yes_col] = case_rows[column].fillna('N').eq('Y')
-        case_rows[present_col] = case_rows[column].notna()
-        temp_cols.extend([yes_col, present_col])
-
-    if temp_cols:
-        frames.append(case_rows.groupby('odino', sort=True)[temp_cols].max())
-
-    case_df = pd.concat(frames, axis=1).reset_index()
-    case_df = reconstruct_yn_cols(case_df, yn_cols)
-    case_df['miles_missing_flag'] = case_df['miles'].isna()
-    case_df['veh_speed_missing_flag'] = case_df['veh_speed'].isna()
-    case_df = add_safe_lag_fields(case_df)
-    return add_severity_flags(
-        case_df,
-        primary_name='severity_primary_flag',
-        broad_name='severity_broad_flag'
-    )
-def build_case_tables(component_df):
-    keep_df = component_df.loc[
-        component_df['component_keep_flag'].fillna(False) & component_df['odino'].notna()
-    ].copy()
-    if keep_df.empty:
-        raise ValueError('No kept component rows found for case collapse')
-
-    group_counts = keep_df.groupby('odino')['component_group'].nunique()
-    single_ids = group_counts.loc[group_counts.eq(1)].index
-    multi_ids = group_counts.loc[group_counts.gt(1)].index
-
-    single_rows = keep_df.loc[keep_df['odino'].isin(single_ids)].copy()
-    multi_rows = keep_df.loc[keep_df['odino'].isin(multi_ids)].copy()
-
-    if single_rows.empty:
-        raise ValueError('No single-label component cases found after filtering')
-
-    base_case_df = collapse_case_features(keep_df, target_mode='base')
-    base_keep_cols = filter_columns(BASE_CASE_COLS, base_case_df)
-    base_case_df = base_case_df.loc[:, base_keep_cols].sort_values('odino').reset_index(drop=True)
-
-    single_target_df = collapse_case_features(single_rows, target_mode='single')[['odino', 'component_group']]
-    single_case_df = base_case_df.loc[base_case_df['odino'].isin(single_ids)].merge(
-        single_target_df,
-        on='odino',
-        how='left',
-        validate='one_to_one'
-    )
-    benchmark_policy = get_split_policy(BENCHMARK_SPLIT_MODE)
-    fit_window_mask = pd.to_datetime(single_case_df['ldate'], errors='coerce').le(benchmark_policy['valid_end'])
-    fit_counts = single_case_df.loc[fit_window_mask, 'component_group'].value_counts()
-    single_case_df['component_group_fit_case_count'] = (
-        single_case_df['component_group']
-        .map(fit_counts)
-        .astype('Int64')
-    )
-    single_case_df['single_label_keep_flag'] = (
-        single_case_df['component_group_fit_case_count']
-        .fillna(0)
-        .ge(SINGLE_LABEL_MIN_CASES)
-    )
-    single_case_bench_df = single_case_df.loc[single_case_df['single_label_keep_flag']].copy()
-    single_keep_cols = filter_columns(SINGLE_CASE_COLS, single_case_df)
-    single_case_df = single_case_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
-    single_case_bench_df = single_case_bench_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
-
-    multi_target_df = collapse_case_features(keep_df, target_mode='multi')[['odino', 'component_groups', 'component_group_count']]
-    multi_case_df = base_case_df.merge(
-        multi_target_df,
-        on='odino',
-        how='left',
-        validate='one_to_one'
-    )
-    multi_keep_cols = filter_columns(MULTI_CASE_COLS, multi_case_df)
-    multi_case_df = multi_case_df.loc[:, multi_keep_cols].sort_values('odino').reset_index(drop=True)
-
-    return keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df
-
-
-# -----------------------------------------------------------------------------
-# Small helpers
-# -----------------------------------------------------------------------------
-def normalize_text(value):
-    if pd.isna(value):
-        return ''
-    return SPACE_RE.sub(' ', str(value).strip())
-
-
-def is_placeholder_text(text):
-    text = normalize_text(text)
-    if not text:
-        return False
-
-    upper = text.upper()
-    if upper in PLACEHOLDER_TEXTS:
-        return True
-
-    return len(text) <= 10 and not bool(ALPHA_RE.search(upper))
-
-
-def build_base_text_rows(clean_df, odino_universe):
-    work = clean_df.loc[
-        clean_df['odino'].isin(odino_universe),
-        ['odino', 'cmplid', 'cdescr', 'source_era', 'ldate']
-    ].copy()
-    work['ldate'] = pd.to_datetime(work['ldate'], errors='coerce')
-    work['cmplid_num'] = pd.to_numeric(work['cmplid'], errors='coerce')
-    work['cdescr_norm'] = work['cdescr'].map(normalize_text)
-    work['cdescr_len'] = work['cdescr_norm'].str.len()
-    work['has_text'] = work['cdescr_norm'].ne('')
-    return work
-
-
 def select_best_text_rows(clean_df, odino_universe):
     base_df = build_base_text_rows(clean_df, odino_universe)
     universe_df = pd.DataFrame({'odino': sorted(pd.Series(odino_universe, dtype='string').dropna().astype(str).unique())})
@@ -1146,6 +1091,65 @@ def select_best_text_rows(clean_df, odino_universe):
         'ldate'
     ]
     return chosen_df.loc[:, keep_cols].sort_values('odino').reset_index(drop=True), base_df
+
+
+def build_case_tables(component_df):
+    keep_df = component_df.loc[
+        component_df['component_keep_flag'].fillna(False) & component_df['odino'].notna()
+    ].copy()
+    if keep_df.empty:
+        raise ValueError('No kept component rows found for case collapse')
+
+    group_counts = keep_df.groupby('odino')['component_group'].nunique()
+    single_ids = group_counts.loc[group_counts.eq(1)].index
+    multi_ids = group_counts.loc[group_counts.gt(1)].index
+
+    single_rows = keep_df.loc[keep_df['odino'].isin(single_ids)].copy()
+    multi_rows = keep_df.loc[keep_df['odino'].isin(multi_ids)].copy()
+
+    if single_rows.empty:
+        raise ValueError('No single-label component cases found after filtering')
+
+    base_case_df = collapse_case_features(keep_df, target_mode='base')
+    base_keep_cols = filter_columns(BASE_CASE_COLS, base_case_df)
+    base_case_df = base_case_df.loc[:, base_keep_cols].sort_values('odino').reset_index(drop=True)
+
+    single_target_df = collapse_case_features(single_rows, target_mode='single')[['odino', 'component_group']]
+    single_case_df = base_case_df.loc[base_case_df['odino'].isin(single_ids)].merge(
+        single_target_df,
+        on='odino',
+        how='left',
+        validate='one_to_one'
+    )
+    benchmark_policy = get_split_policy(BENCHMARK_SPLIT_MODE)
+    fit_window_mask = pd.to_datetime(single_case_df['ldate'], errors='coerce').le(benchmark_policy['valid_end'])
+    fit_counts = single_case_df.loc[fit_window_mask, 'component_group'].value_counts()
+    single_case_df['component_group_fit_case_count'] = (
+        single_case_df['component_group']
+        .map(fit_counts)
+        .astype('Int64')
+    )
+    single_case_df['single_label_keep_flag'] = (
+        single_case_df['component_group_fit_case_count']
+        .fillna(0)
+        .ge(SINGLE_LABEL_MIN_CASES)
+    )
+    single_case_bench_df = single_case_df.loc[single_case_df['single_label_keep_flag']].copy()
+    single_keep_cols = filter_columns(SINGLE_CASE_COLS, single_case_df)
+    single_case_df = single_case_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
+    single_case_bench_df = single_case_bench_df.loc[:, single_keep_cols].sort_values('odino').reset_index(drop=True)
+
+    multi_target_df = collapse_case_features(keep_df, target_mode='multi')[['odino', 'component_groups', 'component_group_count']]
+    multi_case_df = base_case_df.merge(
+        multi_target_df,
+        on='odino',
+        how='left',
+        validate='one_to_one'
+    )
+    multi_keep_cols = filter_columns(MULTI_CASE_COLS, multi_case_df)
+    multi_case_df = multi_case_df.loc[:, multi_keep_cols].sort_values('odino').reset_index(drop=True)
+
+    return keep_df, single_rows, multi_rows, base_case_df, single_case_df, single_case_bench_df, multi_case_df
 
 
 # -----------------------------------------------------------------------------
