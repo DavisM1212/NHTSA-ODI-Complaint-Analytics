@@ -62,7 +62,7 @@ pytest==9.0.3
 python-dateutil==2.9.0.post0
 pyzmq==27.1.0
 regex==2026.2.19
-requests==2.32.5
+requests==2.33.0
 rich==14.3.3
 ruptures==1.1.10
 scikit-learn==1.8.0
