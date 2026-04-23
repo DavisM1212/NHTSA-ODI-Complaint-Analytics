@@ -9,7 +9,7 @@ This repository is designed for a DSBA 6156 (Machine Learning) group project. Th
 - easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
 
-The current workflow already covers complaint ingestion, EDA, audited cleaning, lean shared complaint contracts, single-label and multi-label component target construction, and one official component pipeline with separate reporting. The next major steps are complaint severity ranking and NLP-driven early warning beyond component classification.
+The current workflow already covers complaint ingestion, EDA, audited cleaning, lean shared complaint contracts, an official severity urgency pipeline, single-label and multi-label component target construction, and one official component reporting pipeline. The main remaining modeling area is NLP-driven early warning beyond component classification.
 
 ## Project Overview
 
@@ -29,7 +29,7 @@ Important data workflow rule:
 
 ## Current Status
 
-The repo has a stable, production-ready pipeline for component-level complaint routing. The workflow is organized into four clear stages:
+The repo has stable, production-ready pipelines for severity urgency scoring and component-level complaint routing. The workflow is organized into four clear stages:
 
 ### Stage 1: Ingestion
 
@@ -43,6 +43,7 @@ The repo has a stable, production-ready pipeline for component-level complaint r
 
 ### Stage 3: Main Models
 
+- `src/modeling/severity_urgency_model.py`: Official severity urgency benchmark (tuned text + structured late fusion)
 - `src/modeling/component_single_text_calibrated.py`: Official single-label component router (text + structured, late fusion)
 - `src/modeling/component_multi_routing.py`: Official multi-label component router (structured only)
 - Outputs: Model manifests, metrics, calibration, holdout predictions
@@ -56,7 +57,7 @@ The repo has a stable, production-ready pipeline for component-level complaint r
 
 ### Future Work (WIP in notebooks)
 
-- `notebooks/Severity_Ranking_Framework.ipynb`: Scaffold for severity prioritization (not yet pipeline-hardened)
+- `notebooks/Severity_Ranking_Framework.ipynb`: Exploratory record for the hardened severity urgency model plus sensitivity runs
 - `notebooks/NLP_Early_Warning_Framework.ipynb`: Scaffold for anomaly detection (not yet pipeline-hardened)
 
 **See [src/PIPELINE.md](src/PIPELINE.md) for the live pipeline contract and execution instructions.**
@@ -142,7 +143,14 @@ Expected inputs:
 - `data/processed/odi_component_multilabel_cases.parquet`
 - `data/processed/odi_component_text_sidecar.parquet`
 
-Expected outputs:
+Official severity pipeline outputs:
+
+- `data/outputs/severity_urgency_official_manifest.json`
+- `data/outputs/severity_urgency_official_metrics.csv`
+- `data/outputs/severity_urgency_official_review_budgets.csv`
+- `data/outputs/severity_urgency_official_calibration.csv`
+
+Notebook outputs:
 
 - `data/outputs/severity_partner_results.csv`
 - `data/outputs/nlp_early_warning_watchlist.csv`
@@ -181,6 +189,8 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- setup_env_mac_linux.sh
 |   |-- run_ingest_windows.ps1
 |   |-- run_ingest_mac_linux.sh
+|   |-- run_severity_official_windows.ps1
+|   |-- run_severity_official_mac_linux.sh
 |   |-- run_component_official_windows.ps1
 |   |-- run_component_official_mac_linux.sh
 |   |-- verify_install.py
@@ -212,6 +222,7 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |-- preprocessing/
     |   `-- clean_complaints.py
     |-- modeling/
+    |   |-- severity_urgency_model.py
     |   |-- component_single_text_calibrated.py
     |   |-- component_multi_routing.py
     |   `-- common/
@@ -406,6 +417,16 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - macOS/Linux official component runner
 - Runs the durable component pipeline end to end: clean -> case tables -> text sidecar -> official models -> reporting
 
+`scripts/run_severity_official_windows.ps1`
+
+- Windows official severity runner
+- Runs the durable severity pipeline end to end: ingest optional -> clean -> official severity model
+
+`scripts/run_severity_official_mac_linux.sh`
+
+- macOS/Linux official severity runner
+- Runs the durable severity pipeline end to end: ingest optional -> clean -> official severity model
+
 ### `notebooks/` (interactive, cell-by-cell exploration)
 
 `notebooks/EDA.ipynb`
@@ -423,9 +444,9 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 `notebooks/Severity_Ranking_Framework.ipynb`
 
-- Starting notebook for the severity-ranking section
+- Main exploratory notebook for the severity-ranking section
 - Loads `data/processed/odi_severity_cases.parquet`
-- Shows time-aware train/validation/holdout splits, a naive baseline, a structured baseline, a text baseline, and ranking metrics such as PR-AUC and recall in the top highest-risk rows
+- Documents the final urgency-rule modeling path, the failed but useful experiments, and the broad-target sensitivity run
 - Writes `data/outputs/severity_partner_results.csv`
 
 `notebooks/NLP_Early_Warning_Framework.ipynb`
@@ -468,6 +489,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `src/modeling/`
 
 - Official model training logic plus shared helpers
+- `severity_urgency_model.py`: official severity urgency benchmark with one baseline and one tuned calibrated late-fusion path
 - `component_single_text_calibrated.py`: official calibrated single-label component benchmark
 - `component_multi_routing.py`: official multi-label routing benchmark
 - `common/helpers.py`: shared structured-model and split helpers
@@ -700,10 +722,22 @@ Optional flags:
 .\scripts\run_component_official_windows.ps1
 ```
 
+### Run the official severity pipeline (Windows)
+
+```powershell
+.\scripts\run_severity_official_windows.ps1
+```
+
 ### Run the official component pipeline (macOS / Linux)
 
 ```bash
 ./scripts/run_component_official_mac_linux.sh
+```
+
+### Run the official severity pipeline (macOS / Linux)
+
+```bash
+./scripts/run_severity_official_mac_linux.sh
 ```
 
 ### What the ingestion step does
@@ -745,6 +779,12 @@ This one step writes the cleaned complaints table, the severity cases table, the
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.modeling.component_multi_routing --task-type CPU
+```
+
+#### Official severity urgency model
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.severity_urgency_model
 ```
 
 #### Refresh generated reporting

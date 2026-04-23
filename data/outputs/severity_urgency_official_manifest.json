@@ -1,0 +1,208 @@
+{
+  "scope": "official severity urgency benchmark",
+  "publish_status": "official",
+  "input_path": "C:\\Users\\davis\\OneDrive\\Documents\\VS Code Repos\\NHTSA-ODI-Complaint-Analytics\\data\\processed\\odi_severity_cases.parquet",
+  "target_col": "severity_primary_flag",
+  "baseline_model_name": "dummy_prior",
+  "official_model_name": "late_fusion_sigmoid",
+  "official_model_family": "late_fusion",
+  "notebook_reference_model_name": "hybrid_late_fusion_tuned_alpha_1em05_word_30000_char_20000_w_0_81_sigmoid_calibrated",
+  "split_mode": "benchmark_v1",
+  "split_contract": {
+    "train_end": "2024-12-31T00:00:00",
+    "valid_end": "2025-12-31T00:00:00",
+    "train_name": "train",
+    "valid_name": "valid_2025",
+    "holdout_name": "holdout_2026",
+    "holdout_policy": "2026 holdout untouched during official benchmark selection"
+  },
+  "split_summary": [
+    {
+      "split": "train",
+      "rows": 290889,
+      "positive_rate": 0.062401809624977225
+    },
+    {
+      "split": "valid_2025",
+      "rows": 73985,
+      "positive_rate": 0.05256470906264783
+    },
+    {
+      "split": "holdout_2026",
+      "rows": 11063,
+      "positive_rate": 0.06011027750158185
+    }
+  ],
+  "locked_params": {
+    "structured_cat_features": [
+      "mfr_name",
+      "maketxt",
+      "modeltxt",
+      "state",
+      "cmpl_type",
+      "drive_train",
+      "fuel_type",
+      "police_rpt_yn",
+      "repaired_yn",
+      "orig_owner_yn"
+    ],
+    "structured_num_features": [
+      "yeartxt",
+      "miles",
+      "veh_speed",
+      "lag_days_safe",
+      "miles_missing_flag",
+      "veh_speed_missing_flag",
+      "faildate_trusted_flag",
+      "faildate_untrusted_flag",
+      "component_count",
+      "row_count",
+      "complaint_year",
+      "complaint_month"
+    ],
+    "text_source_col": "cdescr",
+    "text_clean_mode": "light",
+    "domain_cleanup": false,
+    "error_cleanup": true,
+    "preserved_stop_words": [
+      "after",
+      "against",
+      "before",
+      "down",
+      "during",
+      "never",
+      "no",
+      "none",
+      "not",
+      "off",
+      "on",
+      "over",
+      "under",
+      "up",
+      "while",
+      "without"
+    ],
+    "word_ngram_range": [
+      1,
+      2
+    ],
+    "char_ngram_range": [
+      3,
+      5
+    ],
+    "word_max_features": 30000,
+    "char_max_features": 20000,
+    "text_min_df": 5,
+    "sgd_alpha": 1e-05,
+    "text_weight": 0.81
+  },
+  "promotion_rule": "Fit raw, sigmoid, and isotonic candidates on valid_2025; only allow a calibrated winner if recall_top_5pct stays within 0.002 of raw; if sigmoid and isotonic Brier differ by 0.002 or less, prefer sigmoid; otherwise choose lower Brier; calibrated candidate must also beat raw on Brier to be promoted",
+  "timing_seconds": {
+    "baseline_fit": 0.01,
+    "structured_fit": 0.43,
+    "text_fit": 3.78,
+    "total": 227.96
+  },
+  "validation_metrics": {
+    "baseline": {
+      "model": "dummy_prior",
+      "split": "valid_2025",
+      "rows": 73985,
+      "positive_rate": 0.05256470906264783,
+      "pr_auc": 0.05256470906264783,
+      "roc_auc": 0.5,
+      "f1": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "brier_score": 0.0498984289712804,
+      "calibration_method": "prior",
+      "is_baseline": true,
+      "is_official": false,
+      "recall_top_1pct": 0.008999742864489586,
+      "recall_top_2pct": 0.01851375674980715,
+      "recall_top_5pct": 0.04268449472872204,
+      "precision_top_5pct": 0.044864864864864865,
+      "lift_top_5pct": 0.8535168493255405,
+      "recall_top_10pct": 0.08099768578040627,
+      "precision_top_10pct": 0.04257332071901608,
+      "lift_top_10pct": 0.8099221222412972
+    },
+    "official": {
+      "model": "late_fusion_sigmoid",
+      "split": "valid_2025",
+      "rows": 73985,
+      "positive_rate": 0.05256470906264783,
+      "pr_auc": 0.8228724357241454,
+      "roc_auc": 0.9599707661693248,
+      "f1": 0.7714324287835831,
+      "precision": 0.8121091529277998,
+      "recall": 0.7346361532527642,
+      "brier_score": 0.018791251242326227,
+      "calibration_method": "sigmoid",
+      "is_baseline": false,
+      "is_official": true,
+      "recall_top_1pct": 0.1892517356646953,
+      "recall_top_2pct": 0.37027513499614295,
+      "recall_top_5pct": 0.7508356904088455,
+      "precision_top_5pct": 0.7891891891891892,
+      "lift_top_5pct": 15.01366987970228,
+      "recall_top_10pct": 0.8788891745950116,
+      "precision_top_10pct": 0.4619543181511015,
+      "lift_top_10pct": 8.788297821653186
+    }
+  },
+  "holdout_metrics": {
+    "baseline": {
+      "model": "dummy_prior",
+      "split": "holdout_2026",
+      "rows": 11063,
+      "positive_rate": 0.06011027750158185,
+      "pr_auc": 0.06011027750158185,
+      "roc_auc": 0.5,
+      "f1": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "brier_score": 0.05650228315973722,
+      "calibration_method": "prior",
+      "is_baseline": true,
+      "is_official": false,
+      "recall_top_1pct": 0.006015037593984963,
+      "recall_top_2pct": 0.009022556390977444,
+      "recall_top_5pct": 0.045112781954887216,
+      "precision_top_5pct": 0.05415162454873646,
+      "lift_top_5pct": 0.9008713118536413,
+      "recall_top_10pct": 0.0887218045112782,
+      "precision_top_10pct": 0.053297199638663056,
+      "lift_top_10pct": 0.8866570219586908
+    },
+    "official": {
+      "model": "late_fusion_sigmoid",
+      "split": "holdout_2026",
+      "rows": 11063,
+      "positive_rate": 0.06011027750158185,
+      "pr_auc": 0.8483449982113277,
+      "roc_auc": 0.9678221809572979,
+      "f1": 0.8043143297380585,
+      "precision": 0.8246445497630331,
+      "recall": 0.7849624060150376,
+      "brier_score": 0.019154613312998458,
+      "calibration_method": "sigmoid",
+      "is_baseline": false,
+      "is_official": true,
+      "recall_top_1pct": 0.162406015037594,
+      "recall_top_2pct": 0.3218045112781955,
+      "recall_top_5pct": 0.7203007518796992,
+      "precision_top_5pct": 0.8646209386281588,
+      "lift_top_5pct": 14.383911945929805,
+      "recall_top_10pct": 0.9007518796992481,
+      "precision_top_10pct": 0.5411020776874436,
+      "lift_top_10pct": 9.001822985648403
+    }
+  },
+  "artifact_names": {
+    "manifest": "severity_urgency_official_manifest.json",
+    "metrics": "severity_urgency_official_metrics.csv",
+    "review_budgets": "severity_urgency_official_review_budgets.csv",
+    "calibration": "severity_urgency_official_calibration.csv"
+  }
+}

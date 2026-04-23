@@ -57,6 +57,11 @@ COMPONENT_MULTI_OFFICIAL_SPLIT = 'component_multilabel_official_split_summary.cs
 COMPONENT_MULTI_OFFICIAL_METRICS = 'component_multilabel_official_metrics.csv'
 COMPONENT_MULTI_OFFICIAL_LABELS = 'component_multilabel_official_label_metrics.csv'
 
+SEVERITY_URGENCY_OFFICIAL_MANIFEST = 'severity_urgency_official_manifest.json'
+SEVERITY_URGENCY_OFFICIAL_METRICS = 'severity_urgency_official_metrics.csv'
+SEVERITY_URGENCY_OFFICIAL_REVIEW_BUDGETS = 'severity_urgency_official_review_budgets.csv'
+SEVERITY_URGENCY_OFFICIAL_CALIBRATION = 'severity_urgency_official_calibration.csv'
+
 
 # -----------------------------------------------------------------------------
 # Split modes

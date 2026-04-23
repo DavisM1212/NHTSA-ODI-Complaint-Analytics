@@ -84,8 +84,28 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 
 - `src/modeling/component_single_text_calibrated.py`
 - `src/modeling/component_multi_routing.py`
+- `src/modeling/severity_urgency_model.py`
 - `src/modeling/common/helpers.py`
 - `src/modeling/common/text_fusion.py`
+
+### Severity urgency official model
+
+**Reads**
+
+- `data/processed/odi_severity_cases.parquet`
+
+**Writes**
+
+- `data/outputs/severity_urgency_official_manifest.json`
+- `data/outputs/severity_urgency_official_metrics.csv`
+- `data/outputs/severity_urgency_official_review_budgets.csv`
+- `data/outputs/severity_urgency_official_calibration.csv`
+
+**Notes**
+
+- The official severity target is `severity_primary_flag`
+- The official severity path keeps one `dummy_prior` baseline and one tuned calibrated late-fusion urgency model
+- The broader `severity_broad_flag` work remains notebook-only sensitivity analysis for now
 
 ### Single-label official model
 
@@ -120,6 +140,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 
 - The official single-label model remains the calibrated late-fusion text plus structured model
 - The official multi-label model remains the structured CatBoost routing model
+- The official severity model is a tuned calibrated late-fusion urgency model on `odi_severity_cases`
 - Archived experiments and their helpers live under `notebooks/archive/`
 
 ---
@@ -170,6 +191,7 @@ src/
 |-- modeling/
 |   |-- component_single_text_calibrated.py
 |   |-- component_multi_routing.py
+|   |-- severity_urgency_model.py
 |   `-- common/
 |       |-- helpers.py
 |       `-- text_fusion.py
@@ -185,6 +207,7 @@ src/
 ```bash
 python -m src.data.ingest_odi
 python -m src.preprocessing.clean_complaints
+python -m src.modeling.severity_urgency_model
 python -m src.modeling.component_single_text_calibrated
 python -m src.modeling.component_multi_routing
 python -m src.reporting.component_visuals
