@@ -65,8 +65,21 @@ The repo has stable, production-ready pipelines for severity urgency scoring and
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
 
-This section is generated from the official component manifests in `data/outputs/`.
-The official published component-model scores come from the untouched `2026` holdout.
+This section is generated from the official severity and component benchmark artifacts in `data/outputs/`.
+Severity reports the locked primary-target urgency rule on `valid_2025` plus the `2026` reference check.
+The published component-model scores come from the untouched `2026` holdout.
+
+#### Severity urgency benchmark
+
+- Scope: official complaint-level severity urgency benchmark
+- Target: `severity_primary_flag`
+- Baseline: `dummy_prior`
+- Model: `late_fusion_sigmoid`
+- Text weight: `0.81`
+- Validation PR-AUC / Brier: `0.8282` / `0.0182`
+- Validation top-5% recall / precision: `0.7565` / `0.7951`
+- Holdout PR-AUC / Brier: `0.8452` / `0.0196`
+- Holdout top-5% recall / precision: `0.7233` / `0.8682`
 
 #### Single-label component benchmark
 
@@ -76,11 +89,12 @@ The official published component-model scores come from the untouched `2026` hol
 - Text weight: `0.75`
 - Final text model: `sgd`
 - Calibration: `power` alpha `1.5` from `select_2025`
-- Structured branch iteration: `1280`
-- Holdout macro F1: `0.7454`
-- Holdout top-1 accuracy: `0.8523`
-- Holdout top-3 accuracy: `0.9500`
-- Holdout calibration ECE: `0.0243`
+- Structured branch iteration: `1800`
+- Holdout macro F1: `0.7466`
+- Holdout top-1 accuracy: `0.8522`
+- Holdout top-3 accuracy: `0.9481`
+- Holdout calibration ECE: `0.0251`
+- Release status: `official`
 
 #### Multi-label routing benchmark
 
@@ -93,6 +107,7 @@ The official published component-model scores come from the untouched `2026` hol
 - Holdout micro F1: `0.4571`
 - Holdout recall@3: `0.6751`
 - Holdout precision@3: `0.3027`
+- Release status: `official`
 
 <!-- COMPONENT_BENCHMARK_END -->
 

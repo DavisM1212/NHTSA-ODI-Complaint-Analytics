@@ -61,6 +61,35 @@ def build_multi_manifest():
     }
 
 
+def build_severity_manifest():
+    return {
+        'scope': 'official severity urgency benchmark',
+        'publish_status': 'official',
+        'target_col': 'severity_primary_flag',
+        'baseline_model_name': 'dummy_prior',
+        'official_model_name': 'late_fusion_sigmoid',
+        'locked_params': {
+            'text_weight': 0.81
+        },
+        'validation_metrics': {
+            'official': {
+                'pr_auc': 0.8282,
+                'brier_score': 0.0182,
+                'recall_top_5pct': 0.7565,
+                'precision_top_5pct': 0.7951
+            }
+        },
+        'holdout_metrics': {
+            'official': {
+                'pr_auc': 0.8452,
+                'brier_score': 0.0196,
+                'recall_top_5pct': 0.7233,
+                'precision_top_5pct': 0.8682
+            }
+        }
+    }
+
+
 def test_update_component_readme_replaces_marker_block():
     tmp_path = Path('data/outputs') / f'test_readme_{uuid.uuid4().hex}'
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -85,14 +114,22 @@ def test_update_component_readme_replaces_marker_block():
         multi_manifest = tmp_path / 'multi.json'
         multi_manifest.write_text(json.dumps(build_multi_manifest()), encoding='utf-8')
 
+        severity_manifest = tmp_path / 'severity.json'
+        severity_manifest.write_text(json.dumps(build_severity_manifest()), encoding='utf-8')
+
         update_component_readme(
             single_manifest_path=single_manifest,
             multi_manifest_path=multi_manifest,
+            severity_manifest_path=severity_manifest,
             readme_path=readme_path,
             write_summary=False
         )
 
         updated = readme_path.read_text(encoding='utf-8')
+        assert 'Severity urgency benchmark' in updated
+        assert 'severity_primary_flag' in updated
+        assert 'late_fusion_sigmoid' in updated
+        assert '0.8282' in updated
         assert 'text_structured_late_fusion' in updated
         assert '0.7454' in updated
         assert '0.4571' in updated

@@ -9,6 +9,7 @@ from src.config.contracts import (
     COMPONENT_SINGLE_OFFICIAL_MANIFEST,
     README_END,
     README_START,
+    SEVERITY_URGENCY_OFFICIAL_MANIFEST,
 )
 from src.config.paths import OUTPUTS_DIR, PROJECT_ROOT
 
@@ -18,7 +19,7 @@ ALLOWED_RELEASE_STATUSES = {'official', 'promoted'}
 def load_manifest(manifest_path):
     path = Path(manifest_path)
     if not path.exists():
-        raise FileNotFoundError(f'Missing manifest: {path}')
+        raise FileNotFoundError(f"Missing manifest: {path}")
 
     with path.open('r', encoding='utf-8') as handle:
         return json.load(handle)
@@ -37,22 +38,22 @@ def validate_release_status(manifest, manifest_name):
     status = str(manifest.get('promotion_status', '')).strip().lower()
     if status not in ALLOWED_RELEASE_STATUSES:
         allowed = ', '.join(sorted(ALLOWED_RELEASE_STATUSES))
-        raise ValueError(f'{manifest_name} must record promotion_status as one of: {allowed}')
+        raise ValueError(f"{manifest_name} must record promotion_status as one of: {allowed}")
     if not bool(manifest.get('reporting_ready', False)):
-        raise ValueError(f'{manifest_name} must set reporting_ready=true before publishing')
+        raise ValueError(f"{manifest_name} must set reporting_ready=true before publishing")
 
 
 def require_dict(manifest, field_name, manifest_name):
     value = manifest.get(field_name)
     if not isinstance(value, dict) or not value:
-        raise ValueError(f'{manifest_name} is missing required dict field: {field_name}')
+        raise ValueError(f"{manifest_name} is missing required dict field: {field_name}")
     return value
 
 
 def require_field(manifest, field_name, manifest_name):
     value = manifest.get(field_name)
     if value in {None, ''}:
-        raise ValueError(f'{manifest_name} is missing required field: {field_name}')
+        raise ValueError(f"{manifest_name} is missing required field: {field_name}")
     return value
 
 
@@ -81,6 +82,50 @@ def validate_multi_manifest(multi_manifest):
     require_dict(multi_manifest, 'official_holdout_metrics', manifest_name)
     require_dict(multi_manifest, 'artifacts', manifest_name)
     return multi_manifest
+
+
+def validate_severity_manifest(severity_manifest):
+    manifest_name = SEVERITY_URGENCY_OFFICIAL_MANIFEST
+    status = str(severity_manifest.get('publish_status', '')).strip().lower()
+    if status not in ALLOWED_RELEASE_STATUSES:
+        allowed = ', '.join(sorted(ALLOWED_RELEASE_STATUSES))
+        raise ValueError(f"{manifest_name} must record publish_status as one of: {allowed}")
+
+    require_field(severity_manifest, 'scope', manifest_name)
+    require_field(severity_manifest, 'target_col', manifest_name)
+    require_field(severity_manifest, 'baseline_model_name', manifest_name)
+    require_field(severity_manifest, 'official_model_name', manifest_name)
+    locked_params = require_dict(severity_manifest, 'locked_params', manifest_name)
+    validation_metrics = require_dict(severity_manifest, 'validation_metrics', manifest_name)
+    holdout_metrics = require_dict(severity_manifest, 'holdout_metrics', manifest_name)
+
+    if not isinstance(validation_metrics.get('official'), dict) or not validation_metrics['official']:
+        raise ValueError(f"{manifest_name} is missing validation_metrics.official")
+    if not isinstance(holdout_metrics.get('official'), dict) or not holdout_metrics['official']:
+        raise ValueError(f"{manifest_name} is missing holdout_metrics.official")
+    if 'text_weight' not in locked_params:
+        raise ValueError(f"{manifest_name} is missing locked_params.text_weight")
+    return severity_manifest
+
+
+def build_severity_lines(severity_manifest):
+    valid = severity_manifest['validation_metrics']['official']
+    holdout = severity_manifest['holdout_metrics']['official']
+    locked = severity_manifest['locked_params']
+    return [
+        '#### Severity urgency benchmark',
+        '',
+        '- Scope: official complaint-level severity urgency benchmark',
+        f"- Target: `{severity_manifest.get('target_col', 'n/a')}`",
+        f"- Baseline: `{severity_manifest.get('baseline_model_name', 'n/a')}`",
+        f"- Model: `{severity_manifest.get('official_model_name', 'n/a')}`",
+        f"- Text weight: `{locked.get('text_weight', 'n/a')}`",
+        f"- Validation PR-AUC / Brier: `{format_metric(valid.get('pr_auc'))}` / `{format_metric(valid.get('brier_score'))}`",
+        f"- Validation top-5% recall / precision: `{format_metric(valid.get('recall_top_5pct'))}` / `{format_metric(valid.get('precision_top_5pct'))}`",
+        f"- Holdout PR-AUC / Brier: `{format_metric(holdout.get('pr_auc'))}` / `{format_metric(holdout.get('brier_score'))}`",
+        f"- Holdout top-5% recall / precision: `{format_metric(holdout.get('recall_top_5pct'))}` / `{format_metric(holdout.get('precision_top_5pct'))}`",
+        ''
+    ]
 
 
 def build_single_lines(single_manifest):
@@ -189,22 +234,31 @@ def write_summary_artifacts(single_manifest=None, multi_manifest=None, summary_c
     return csv_path, json_path
 
 
-def build_readme_block(single_manifest=None, multi_manifest=None):
+def build_readme_block(severity_manifest=None, single_manifest=None, multi_manifest=None):
     lines = [
         README_START,
         '### Generated Benchmark Snapshot',
         '',
-        'This section is generated from the official component benchmark manifests in `data/outputs/`.',
+        'This section is generated from the official severity and component benchmark artifacts in `data/outputs/`.',
+        'Severity reports the locked primary-target urgency rule on `valid_2025` plus the `2026` reference check.',
         'The published component-model scores come from the untouched `2026` holdout.',
         ''
     ]
+    if severity_manifest is not None:
+        lines.extend(build_severity_lines(severity_manifest))
     lines.extend(build_single_lines(single_manifest))
     lines.extend(build_multi_lines(multi_manifest))
     lines.append(README_END)
     return '\n'.join(lines)
 
 
-def update_component_readme(single_manifest_path=None, multi_manifest_path=None, readme_path=None, write_summary=True):
+def update_component_readme(
+    single_manifest_path=None,
+    multi_manifest_path=None,
+    severity_manifest_path=None,
+    readme_path=None,
+    write_summary=True
+):
     readme_path = Path(readme_path) if readme_path is not None else PROJECT_ROOT / 'README.md'
     text = readme_path.read_text(encoding='utf-8')
 
@@ -213,10 +267,17 @@ def update_component_readme(single_manifest_path=None, multi_manifest_path=None,
 
     single_manifest = validate_single_manifest(load_manifest(single_path))
     multi_manifest = validate_multi_manifest(load_manifest(multi_path))
-    block = build_readme_block(single_manifest=single_manifest, multi_manifest=multi_manifest)
+    severity_manifest = None
+    if severity_manifest_path is not None:
+        severity_manifest = validate_severity_manifest(load_manifest(severity_manifest_path))
+    block = build_readme_block(
+        severity_manifest=severity_manifest,
+        single_manifest=single_manifest,
+        multi_manifest=multi_manifest
+    )
 
     if README_START not in text or README_END not in text:
-        raise ValueError('README benchmark markers not found')
+        raise ValueError("README benchmark markers not found")
 
     start_idx = text.index(README_START)
     end_idx = text.index(README_END) + len(README_END)
@@ -229,10 +290,11 @@ def update_component_readme(single_manifest_path=None, multi_manifest_path=None,
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Update the README component benchmark section from the official manifests'
+        description='Update the README benchmark section from the official severity and component artifacts'
     )
     parser.add_argument('--single-manifest', default=None)
     parser.add_argument('--multi-manifest', default=None)
+    parser.add_argument('--severity-manifest', default=str(OUTPUTS_DIR / SEVERITY_URGENCY_OFFICIAL_MANIFEST))
     parser.add_argument('--readme-path', default=None)
     parser.add_argument('--no-summary', action='store_true')
     return parser.parse_args()
@@ -243,6 +305,7 @@ def main():
     readme_path = update_component_readme(
         single_manifest_path=args.single_manifest,
         multi_manifest_path=args.multi_manifest,
+        severity_manifest_path=args.severity_manifest,
         readme_path=args.readme_path,
         write_summary=not args.no_summary
     )
