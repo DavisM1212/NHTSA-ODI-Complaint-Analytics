@@ -519,8 +519,8 @@ def prepare_severity_cases(raw_df):
     work[TEXT_MODEL_COL] = work[TEXT_SOURCE_COL].fillna('').astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
     work['complaint_year'] = work[DATE_COL].dt.year.astype('int64')
     work['complaint_month'] = work[DATE_COL].dt.month.astype('int64')
-
-    return work.sort_values([DATE_COL, ID_COL], kind='mergesort').reset_index(drop=True)
+    # Preserve the cleaned input order so the hardened pipeline matches the locked notebook fit path
+    return work.reset_index(drop=True)
 
 
 def split_severity_cases(case_df):
