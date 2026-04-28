@@ -1,0 +1,7 @@
+figure,path,title,description
+severity_split_context,docs/figures/severity_model/severity_split_context.png,Severity Benchmark Data Window,"Row counts and severe-case rates for the train, validation, and holdout severity benchmark splits"
+severity_official_vs_baseline,docs/figures/severity_model/severity_official_vs_baseline.png,Official Severity Model Vs Baseline,Validation and holdout comparison between the dummy prior baseline and the official calibrated late-fusion severity model
+severity_review_budget_tradeoff,docs/figures/severity_model/severity_review_budget_tradeoff.png,Review Budget Tradeoff,"How recall and precision change as reviewers inspect the top 1%, 2%, 5%, or 10% of complaints"
+severity_captured_cases_by_budget,docs/figures/severity_model/severity_captured_cases_by_budget.png,Captured Severe Complaints By Review Budget,How many severe complaints the official model captures at each review budget compared with the dummy baseline
+severity_validation_calibration,docs/figures/severity_model/severity_validation_calibration.png,Validation Calibration Comparison,"Reliability curves for the raw, sigmoid-calibrated, and isotonic-calibrated severity candidates on validation"
+severity_holdout_calibration,docs/figures/severity_model/severity_holdout_calibration.png,Holdout Calibration Check,Reliability comparison between the raw late-fusion score and the promoted official severity model on the 2026 holdout

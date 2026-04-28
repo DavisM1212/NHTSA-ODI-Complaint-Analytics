@@ -50,9 +50,10 @@ The repo has stable, production-ready pipelines for severity urgency scoring and
 
 ### Stage 4: Reporting
 
-- `src/reporting/component_visuals.py`: Generate confusion matrices, calibration plots
+- `src/reporting/component_visuals.py`: Generate component confusion matrices, calibration plots, and benchmark visuals
+- `src/reporting/severity_visuals.py`: Generate severity benchmark, calibration, and review-budget visuals
 - `src/reporting/update_component_readme.py`: Update README with latest results
-- Outputs: `docs/figures/component_models/*.png`
+- Outputs: `docs/figures/component_models/*.png` and `docs/figures/severity_model/*.png`
 - Reporting keeps the Wave 2b calibration manifest as an input for the single-label lift figure
 
 ### Future Work (WIP in notebooks)
@@ -165,6 +166,10 @@ Official severity pipeline outputs:
 - `data/outputs/severity_urgency_official_review_budgets.csv`
 - `data/outputs/severity_urgency_official_calibration.csv`
 
+Official severity figures:
+
+- `docs/figures/severity_model/*.png`
+
 Notebook outputs:
 
 - `data/outputs/severity_partner_results.csv`
@@ -245,6 +250,7 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |       `-- text_fusion.py
     `-- reporting/
         |-- component_visuals.py
+        |-- severity_visuals.py
         `-- update_component_readme.py
 ```
 
@@ -379,6 +385,11 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 - Presentation-ready component-model figures generated from saved benchmark artifacts
 - Current generated figures include model lift, per-class F1, calibration, confusion, routing performance, and target-scope framing
+
+`docs/figures/severity_model/`
+
+- Presentation-ready severity-model figures generated from the official severity artifacts
+- Current generated figures include split context, baseline-vs-official benchmark comparisons, review-budget tradeoffs, captured severe cases by budget, and calibration checks
 
 ### `scripts/` (quick setup commands)
 
@@ -515,6 +526,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Reproducible tables/figures/report outputs for presentations and writeups
 - `update_component_readme.py`: refreshes the generated component benchmark block and official summary artifacts
 - `component_visuals.py`: generates presentation-ready figures for the locked component-model results
+- `severity_visuals.py`: generates presentation-ready figures for the locked severity urgency model
 
 ### Quick rule of thumb for beginners
 
@@ -814,6 +826,12 @@ This one step writes the cleaned complaints table, the severity cases table, the
 .\.venv\Scripts\python.exe -m src.reporting.component_visuals
 ```
 
+#### Generate severity presentation figures
+
+```powershell
+.\.venv\Scripts\python.exe -m src.reporting.severity_visuals
+```
+
 ### Run archive experiment entrypoints manually
 
 These scripts are archived under `notebooks/archive/`. They remain useful for historical comparisons and heavier experimentation, but they are not part of the official reporting contract.
@@ -842,7 +860,7 @@ These scripts are archived under `notebooks/archive/`. They remain useful for hi
 .\.venv\Scripts\python.exe notebooks/archive/component_text_wave2.py --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
 ```
 
-The official pipeline commands above produce the benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/`. The archive scripts write their own exploratory manifests and tables, but those are not part of the supported reporting surface.
+The official pipeline commands above produce the benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/` and `docs/figures/severity_model/`. The archive scripts write their own exploratory manifests and tables, but those are not part of the supported reporting surface.
 
 ## Git Basics Overview
 

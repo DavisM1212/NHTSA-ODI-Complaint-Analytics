@@ -150,6 +150,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 **Files**
 
 - `src/reporting/component_visuals.py`
+- `src/reporting/severity_visuals.py`
 - `src/reporting/update_component_readme.py`
 
 **Reads**
@@ -161,6 +162,8 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 
 - `docs/figures/component_models/*.png`
 - `docs/figures/component_models/component_model_figure_index.csv`
+- `docs/figures/severity_model/*.png`
+- `docs/figures/severity_model/severity_model_figure_index.csv`
 - `data/outputs/component_official_benchmark_summary.csv`
 - `data/outputs/component_official_benchmark_summary.json`
 - Updated `README.md` benchmark block
@@ -197,6 +200,7 @@ src/
 |       `-- text_fusion.py
 `-- reporting/
     |-- component_visuals.py
+    |-- severity_visuals.py
     `-- update_component_readme.py
 ```
 
@@ -211,6 +215,7 @@ python -m src.modeling.severity_urgency_model
 python -m src.modeling.component_single_text_calibrated
 python -m src.modeling.component_multi_routing
 python -m src.reporting.component_visuals
+python -m src.reporting.severity_visuals
 python -m src.reporting.update_component_readme
 ```
 
