@@ -1,12 +1,12 @@
 # Component Model Report
 
-Last updated: April 6, 2026
+Last updated: April 29, 2026
 
 ## Executive Summary
 
 The component-model phase is locked with two official models:
 
-- Single-label component benchmark: calibrated Wave 2b `text_structured_late_fusion`
+- Single-label component benchmark: calibrated official `text_structured_late_fusion`
 - Multi-label routing benchmark: structured CatBoost MultiLabel on `core_structured`
 
 The models differ by task because the complaint narrative text produced a large and stable gain for the scoped single-label benchmark. For the full multi-label component task, the text model improved rare labels but missed too much of the overall label set, so the structured CatBoost model remains the better official benchmark.
@@ -17,7 +17,7 @@ The models differ by task because the complaint narrative text produced a large 
 
 | Task | Official model | Inputs | Final holdout split | Primary metric | Result |
 | --- | --- | --- | --- | --- | --- |
-| Single-label component classification | `text_structured_late_fusion` | Complaint narrative text + `wave1_incident_cohort_history` structured features | `holdout_2026` | Macro F1 | 0.7454 |
+| Single-label component classification | `text_structured_late_fusion` | Complaint narrative text + `wave1_incident_cohort_history` structured features | `holdout_2026` | Macro F1 | 0.7466 |
 | Multi-label component routing | `CatBoost MultiLabel` | `core_structured` features | `holdout_2026` | Macro F1 with routing metrics | 0.2285 |
 
 Single-label supporting metrics:
@@ -25,10 +25,10 @@ Single-label supporting metrics:
 | Metric | Structured CatBoost baseline | Final calibrated text fusion |
 | --- | ---: | ---: |
 | Holdout rows | 6,995 | 6,995 |
-| Macro F1 | 0.3319 | 0.7454 |
-| Top-1 accuracy | 0.4722 | 0.8523 |
-| Top-3 accuracy | 0.7052 | 0.9500 |
-| Calibration ECE | 0.0121 | 0.0243 |
+| Macro F1 | 0.3319 | 0.7466 |
+| Top-1 accuracy | 0.4722 | 0.8522 |
+| Top-3 accuracy | 0.7052 | 0.9481 |
+| Calibration ECE | 0.0121 | 0.0251 |
 
 Multi-label supporting metrics:
 
@@ -86,8 +86,6 @@ Two related but different modeling tasks are kept:
 
 The single-label task is a cleaner classification benchmark. The multi-label task better reflects the real complaint problem, where one complaint can mention more than one component.
 
-![Component Target Scope](figures/component_models/component_target_scope.png)
-
 ## Data And Target Scope
 
 The component target universe is built from processed ODI complaints and cleaned component group labels.
@@ -98,7 +96,7 @@ Target scope:
 | --- | ---: | ---: | ---: |
 | Kept component cases | 346,590 | 100.00% | 9.33% |
 | Multi-label benchmark cases | 346,590 | 100.00% | 9.33% |
-| Single-label benchmark cases | 251,667 | 72.61% | 8.68% |
+| Single-label benchmark cases | 252,161 | 72.75% | 8.73% |
 | Multi-label-only cases | 94,429 | 27.25% | 10.95% |
 
 This matters because the single-label benchmark is not the full component problem. Multi-label-only complaints are systematically different and have a higher broad-severity rate, so they are preserved in the multi-label benchmark rather than discarded from the project.
@@ -159,7 +157,7 @@ Final configuration:
 - structured branch: CatBoost
 - structured feature set: `wave1_incident_cohort_history`
 - text weight: 0.75
-- structured selected iteration: 1280
+- structured selected iteration: 1800
 - calibration method: power calibration
 - calibration alpha: 1.5
 - calibration source: `select_2025`
@@ -172,7 +170,7 @@ The text model uses simple text features:
 - no lemmatization
 - no stop-word removal
 
-The final single-label model was chosen because it sharply improved holdout macro F1, top-1 accuracy, and top-3 accuracy while staying within the calibration promotion gate after Wave 2b calibration.
+The final single-label model was chosen because it sharply improved holdout macro F1, top-1 accuracy, and top-3 accuracy while staying within the calibration promotion gate after final power calibration.
 
 ![Single-Label Model Lift](figures/component_models/component_single_label_model_lift.png)
 
@@ -200,7 +198,7 @@ The text-based multi-label model was evaluated but not promoted. It improved hol
 
 ## Calibration
 
-The uncalibrated single-label text fusion model was highly accurate, but its confidence scores were too low. Wave 2b applied power calibration using `select_2025`.
+The uncalibrated single-label text fusion model was highly accurate, but its confidence scores were too low. The final official pass applied power calibration using `select_2025`.
 
 Calibration result:
 
@@ -209,13 +207,13 @@ Calibration result:
 | Calibration method | Power |
 | Alpha | 1.5 |
 | Calibration source | `select_2025` |
-| Holdout accuracy | 0.8523 |
-| Average confidence | 0.8747 |
-| Confidence gap | 0.0224 |
-| ECE | 0.0243 |
-| Multiclass Brier score | 0.227377 |
+| Holdout accuracy | 0.8522 |
+| Average confidence | 0.8749 |
+| Confidence gap | 0.0227 |
+| ECE | 0.0251 |
+| Multiclass Brier score | 0.227385 |
 
-The final model's confidence scores are now slightly high overall, but still within the allowed calibration limit. The maximum acceptable ECE was 0.0321, and the final ECE was 0.0243.
+The final model's confidence scores are now slightly high overall, but still within the allowed calibration limit. The maximum acceptable ECE was 0.0321, and the final ECE was 0.0251.
 
 ## Known Limitations
 
@@ -232,13 +230,21 @@ Primary artifacts:
 
 - `data/outputs/component_official_benchmark_summary.csv`
 - `data/outputs/component_official_benchmark_summary.json`
-- `data/outputs/component_textwave2b_calibration_manifest.json`
-- `data/outputs/component_single_label_textwave2b_calibrated_holdout.csv`
-- `data/outputs/component_single_label_textwave2b_calibration.csv`
-- `data/outputs/component_multilabel_manifest.json`
-- `data/outputs/component_multilabel_metrics.csv`
-- `data/outputs/component_multilabel_label_metrics.csv`
+- `data/outputs/component_single_label_official_manifest.json`
+- `data/outputs/component_single_label_official_select_grid.csv`
+- `data/outputs/component_single_label_official_holdout.csv`
+- `data/outputs/component_single_label_official_calibration.csv`
+- `data/outputs/component_single_label_official_class_metrics.csv`
+- `data/outputs/component_single_label_official_confusion_major.csv`
+- `data/outputs/component_multilabel_official_manifest.json`
+- `data/outputs/component_multilabel_official_split_summary.csv`
+- `data/outputs/component_multilabel_official_metrics.csv`
+- `data/outputs/component_multilabel_official_label_metrics.csv`
 - `docs/figures/component_models/component_model_figure_index.csv`
+
+Supporting reporting input:
+
+- `data/outputs/component_textwave2b_calibration_manifest.json`
 
 Regenerate the README benchmark block and official summary artifacts:
 
@@ -254,4 +260,4 @@ Regenerate the presentation figures:
 
 ## Next Use
 
-The component model phase is complete. For the next project phase, the locked component outputs can be used as supporting features or diagnostics for severity ranking and early-warning signal modeling. They should be treated as component-pattern signals, not as ground-truth defect labels.
+The component model phase is complete. The locked component outputs can now be used as supporting features, routing aids, or comparison points for severity work, early-warning work, and future complaint-recall linkage analysis. They should be treated as component-pattern signals, not as ground-truth defect labels.
