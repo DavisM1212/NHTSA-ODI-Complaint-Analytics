@@ -2,12 +2,7 @@
 
 Professional-grade data science workspace for analyzing National Highway Traffic Safety Administration (NHTSA) Office of Defects Investigation (ODI) consumer complaint data, with a focus on reproducible workflows, explainable analyses, and leakage-aware modeling for vehicle safety signal detection.
 
-This repository is designed for a DSBA 6156 (Machine Learning) group project. The current setup emphasizes:
-
-- low-friction onboarding
-- consistent project structure
-- easy local extraction, cleaning, and modeling of ODI complaint data
-- reproducible scripts and shared conventions
+The repository is organized around a locked final modeling and reporting surface for ODI complaint triage, component routing, and NLP early-warning signal monitoring.
 
 The current workflow already covers complaint ingestion, EDA, audited cleaning, lean shared complaint contracts, an official severity urgency pipeline, single-label and multi-label component target construction, one official component reporting pipeline, and an official NLP early-warning pipeline for cohort-level emerging safety signals.
 
@@ -274,79 +269,22 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
         `-- update_component_readme.py
 ```
 
-## Repository File/Folder Guide
+## Repository File/Folder Quick Guide
 
-This section is intentionally detailed for people who may be unfamiliar with Python/data science repos.
-
-### Root files (top level)
-
-`README.md`
-
-- Main onboarding guide for the team
-- Use this first when setting up your environment or learning the workflow
-- Keep this updated when the team changes setup steps or conventions
-
-`requirements.txt`
-
-- Python packages the project needs (pandas, numpy, scikit-learn, etc)
-- Used by the setup scripts to install dependencies into `.venv`
-- Team lead may update this file when adding new libraries
-
-`pyproject.toml`
-
-- Tool configuration file (currently used for `ruff` linting rules)
-- Most teammates can ignore this unless working on code style or linting config
-
-`.gitignore`
-
-- Tells Git which files should not be committed
-- Prevents accidental commits of local outputs and virtual environments
-
-`.gitattributes`
-
-- Helps normalize line endings across Windows/macOS/Linux and marks binary files
-- Reduces noisy diffs and cross-platform Git issues
-- Also marks selected exploration notebooks for automatic output clearing on commit
-
-### `.vscode/` (team editor defaults)
-
-`.vscode/extensions.json`
-
-- Recommends shared VS Code extensions for the team
-- Most teammates will only use this indirectly by accepting recommendations
-
-`.vscode/settings.json`
-
-- Workspace-level VS Code settings for consistent behavior (format on save, search excludes, Python defaults)
-- Windows interpreter path is preconfigured for `.venv\\Scripts\\python.exe`
-- macOS/Linux teammates should select `.venv/bin/python` manually
-
-### `.github/` (repo guardrails and review workflow)
+### `.github/` (repo automation and review workflow)
 
 `.github/CODEOWNERS`
 
-- Assigns the team lead as the default code owner across the repo
-- Supports required code-owner review
+- Assigns the default code owner across the repo
 
 `.github/pull_request_template.md`
 
-- Gives teammates a standard PR checklist
-- Reminds everyone to avoid generated outputs and handle raw-data changes carefully
-- Not strictly necessary for minor pull requests such as continued exploration updates, those can be commit messages
+- Pull request checklist for repo changes
 
 `.github/workflows/pr-ci.yml`
 
 - GitHub Actions workflow that runs lightweight repo checks on PRs and on pushes to `main`
-- Installs dependencies, runs setup verification, checks raw-data hashes/notebook hygiene, and compiles Python files
-
-### `.venv/` (local Python environment)
-
-`.venv/`
-
-- Local virtual environment created by the setup scripts
-- Contains installed Python packages for this project only
-- Not committed to Git
-- Most teammates should never edit files inside `.venv/`
+- Installs dependencies, runs repo verification, checks raw-data hashes/notebook hygiene, and compiles Python files
 
 ### `docs/` (reference docs and project support files)
 
@@ -380,11 +318,9 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Local pandas-friendly outputs (parquet preferred, CSV fallback)
 - These are the files your EDA/modeling work will usually read
 - Current key outputs include:
-  - `odi_complaints_combined.parquet`
   - `odi_complaints_cleaned.parquet`
   - `odi_severity_cases.parquet`
   - `odi_component_single_label_cases.parquet`
-  - `odi_component_multilabel_cases.parquet`
   - `odi_component_text_sidecar.parquet`
 - Ignored by Git
 
@@ -393,13 +329,11 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Official artifacts plus downstream-supporting manifests, summaries, diagnostics, and benchmark artifacts
 - Useful for verifying what a pipeline run produced
 - Current examples include:
-  - `component_textwave2b_calibration_manifest.json`
   - `component_single_label_official_manifest.json`
   - `component_multilabel_official_manifest.json`
   - `component_official_benchmark_summary.csv`
-  - `component_single_label_official_holdout.csv`
-  - `component_multilabel_official_metrics.csv`
-- Mostly ignored by Git, except selected official summary artifacts such as the component benchmark summary files
+  - `severity_urgency_official_manifest.json`
+- Partially ignored by Git, except selected official summary artifacts such as the component benchmark summary files
 
 `docs/figures/component_models/`
 
@@ -413,74 +347,39 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 ### `scripts/` (quick setup commands)
 
-`scripts/setup_env_windows.ps1`
+`scripts/setup_env_windows.ps1` and `scripts/setup_env_mac_linux.sh`
 
-- Windows setup automation
-- Tries to install Python 3.13 via `winget`, creates `.venv`, installs requirements, runs verification
-
-`scripts/setup_env_mac_linux.sh`
-
-- macOS/Linux setup automation
-- Tries `brew`/`apt-get`/`dnf` for Python 3.13, creates `.venv`, installs requirements, runs verification
+- Repo setup automation for Windows and macOS/Linux
+- Tries to install Python 3.13, creates `.venv`, installs requirements, runs verification
 
 `scripts/verify_install.py`
 
 - Setup diagnostic script
 - Checks Python version, imports, required folders, raw zip presence, and write access
 
-`scripts/install_git_filters.py`
-
-- Installs the repo's local Git filters after environment setup
-- Keeps the optional notebook filter available, even though the canonical analysis notebooks are no longer wired to it by default
-
-`scripts/git_notebook_filter.py`
-
-- Lightweight Git clean/smudge filter used for selected exploration notebooks
-- Leaves report/presentation notebooks untouched unless you explicitly mark them in `.gitattributes`
-
 `scripts/check_repo_integrity.py`
 
 - Repo hygiene script used locally and in GitHub Actions
 - Verifies committed raw zip hashes against `data/raw/SHA256SUMS.txt`
 
-`scripts/run_ingest_windows.ps1`
+`scripts/run_ingest_windows.ps1` and `scripts/run_ingest_mac_linux.sh`
 
-- Windows ingest runner
+- Windows and macOS/Linux ingest runner
 - Runs verification and then the complaint extraction/combine step
 
-`scripts/run_ingest_mac_linux.sh`
+`scripts/run_component_official_windows.ps1` and `scripts/run_component_official_mac_linux.sh`
 
-- macOS/Linux ingest runner
-- Runs verification and then the complaint extraction/combine step
-
-`scripts/run_component_official_windows.ps1`
-
-- Windows official component runner
+- Windows and macOS/Linux official component runner
 - Runs the durable component pipeline end to end: clean -> case tables -> text sidecar -> official models -> reporting
 
-`scripts/run_component_official_mac_linux.sh`
+`scripts/run_severity_official_windows.ps1` and `scripts/run_severity_official_mac_linux.sh`
 
-- macOS/Linux official component runner
-- Runs the durable component pipeline end to end: clean -> case tables -> text sidecar -> official models -> reporting
-
-`scripts/run_severity_official_windows.ps1`
-
-- Windows official severity runner
+- Windows and macOS/Linux official severity runner
 - Runs the durable severity pipeline end to end: ingest optional -> clean -> official severity model
 
-`scripts/run_severity_official_mac_linux.sh`
+`scripts/run_nlp_official_windows.ps1` and `scripts/run_nlp_official_mac_linux.sh`
 
-- macOS/Linux official severity runner
-- Runs the durable severity pipeline end to end: ingest optional -> clean -> official severity model
-
-`scripts/run_nlp_official_windows.ps1`
-
-- Windows official NLP early-warning runner
-- Runs the durable NLP pipeline end to end: ingest optional -> clean -> lemma-based topic model -> official watchlist outputs -> official NLP figures
-
-`scripts/run_nlp_official_mac_linux.sh`
-
-- macOS/Linux official NLP early-warning runner
+- Windows and macOS/Linux official NLP early-warning runner
 - Runs the durable NLP pipeline end to end: ingest optional -> clean -> lemma-based topic model -> official watchlist outputs -> official NLP figures
 
 ### `notebooks/` (interactive, cell-by-cell analysis and review)
@@ -512,13 +411,6 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - Supports topic review, watchlist interpretation, and companion-table inspection without being the source of truth for the official pipeline
 
 ### `src/` ("source" folder, contains main Python files grouped by objective)
-
-`src/__init__.py` and `src/<package>/__init__.py`
-
-- These files mark folders as Python packages so imports work cleanly
-  - i.e. the Python files in the folder can be imported the same way you would a library like Pandas with the functions in the file acting like the modules
-- Example import: `from src.config.paths import ensure_project_directories`
-- They can stay empty and shouldn't need to be edited
 
 `src/config/`
 
@@ -559,174 +451,6 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - `severity_visuals.py`: generates presentation-ready figures for the locked severity urgency model
 - `watchlist_visuals.py`: generates presentation-ready figures for the locked NLP early-warning watchlist outputs
 
-### Quick rule of thumb for beginners
-
-If you are unsure where to start:
-
-1. Read `README.md`
-2. Run the setup script in `scripts/`
-3. Run the pipeline script in `scripts/`
-4. Inspect outputs in `data/processed/`
-5. Explore data in `notebooks/EDA.ipynb`
-6. Only then start editing code in `src/`
-
-## Setup Tutorial
-
-This section is intended for teammates who may be new to Python environments, VS Code, or Git.
-
-### 1) Clone the repo in VS Code
-
-Option A (recommended):
-
-1. Open VS Code
-2. Press `Ctrl+Shift+P` (Windows) or `Cmd+Shift+P` (macOS)
-3. Run `Git: Clone`
-4. Paste the repo URL
-5. Choose a local folder, should make it where you intend to store repositories
-6. Click `Open` when VS Code asks to open the cloned repository
-
-Option B (terminal first, then open in VS Code):
-
-```powershell
-git clone <YOUR-REPO-URL>
-cd NHTSA-ODI-COMPLAINT-ANALYTICS
-code .
-```
-
-### 2) Accept the workspace extension recommendations
-
-When VS Code opens the repo, it should detect `.vscode/extensions.json` and prompt for recommended extensions.
-
-Recommended team extensions include Python, Pylance, Rainbow CSV, Ruff, and Data Wrangler.
-
-If you do not see a prompt:
-
-1. Open the Extensions panel
-2. Search for `@recommended`
-3. Install the Workspace Recommendations
-
-### 3) Run the environment setup script
-
-The setup scripts try to automate Python detection/installation, virtual environment creation, dependency install, setup verification, and local Git filter setup for exploration notebooks. Use the terminal pane (defaults to bottom of window) to run the scripts. If there is no terminal window, select Terminal -> New Terminal from the toolbar in the top-left corner.
-
-#### Windows (PowerShell)
-
-Run in the terminal:
-
-```powershell
-.\scripts\setup_env_windows.ps1
-```
-
-If you get an error because script execution is blocked in PowerShell, run this first:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-#### macOS / Linux
-
-Make scripts executable, then run setup:
-
-```bash
-chmod +x scripts/setup_env_mac_linux.sh scripts/run_ingest_mac_linux.sh scripts/run_component_official_mac_linux.sh scripts/run_severity_official_mac_linux.sh scripts/run_nlp_official_mac_linux.sh
-./scripts/setup_env_mac_linux.sh
-```
-
-### 4) If setup script cannot install Python automatically (fallback)
-
-The setup scripts check for Python `3.13.12` and will attempt automatic install using common package managers:
-
-- Windows: `winget` (`Python.Python.3.13`)
-- macOS: `brew install python@3.13`
-- Linux: `apt-get` or `dnf` (if available)
-
-If that fails, install Python manually:
-
-1. Install Python `3.13.12` from sources below
-2. Re-open VS Code
-3. Re-run the setup script
-
-Manual install sources:
-
-- Windows: <https://www.python.org/ftp/python/3.13.12/python-3.13.12-amd64.exe>
-- macOS: <https://www.python.org/ftp/python/3.13.12/python-3.13.12-macos11.pkg>
-
-### 5) Run setup verification explicitly (optional)
-
-The setup scripts already run verification, but you can rerun it manually anytime:
-
-#### Windows
-
-```powershell
-.\.venv\Scripts\python.exe scripts\verify_install.py
-```
-
-If you skipped the setup script and created the environment manually, run this once to enable automatic output clearing for exploration notebooks:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\install_git_filters.py
-```
-
-#### macOS / Linux
-
-```bash
-.venv/bin/python scripts/verify_install.py
-```
-
-What `scripts/verify_install.py` checks:
-
-- Python version (warns if not exactly `3.13.12`)
-- supported runtime imports (`pandas`, `numpy`, `sklearn`, `matplotlib`, `pyarrow`, `catboost`, `spacy`)
-- optional notebook plotting import (`seaborn`) with a warning if it is missing
-- spaCy English model availability for the official NLP path (`en_core_web_sm`) with an install warning if it is missing
-- key project folders
-- presence of zip files in `data/raw/`
-- write access to `data/outputs/`
-
-The official NLP early-warning pipeline requires the spaCy English model `en_core_web_sm`. Install it once after setup if you plan to run the NLP pipeline:
-
-```powershell
-.\.venv\Scripts\python.exe -m spacy download en_core_web_sm
-```
-
-```bash
-.venv/bin/python -m spacy download en_core_web_sm
-```
-
-If you skipped the setup script and created the environment manually, run this once to enable automatic output clearing for exploration notebooks:
-
-```bash
-.venv/bin/python scripts/install_git_filters.py
-```
-
-### 6) Activate the virtual environment
-
-The setup scripts install dependencies using the venv Python directly, but if you want to run commands interactively (Jupyter, scripts, notebooks), activate the venv in your terminal. This is something you will need to do each time you fully close VS Code/your terminal if you want to run commands from the terminal.
-
-#### Windows (PowerShell)
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-#### macOS / Linux
-
-```bash
-source .venv/bin/activate
-```
-
-### 7) VS Code interpreter note (important for macOS/Linux users)
-
-The workspace setting in `.vscode/settings.json` sets the default interpreter path to the Windows venv path:
-
-- `${workspaceFolder}\\.venv\\Scripts\\python.exe`
-
-If you are on macOS/Linux, select your interpreter manually in VS Code:
-
-1. `Ctrl/Cmd + Shift + P`
-2. `Python: Select Interpreter`
-3. Choose `.venv/bin/python`
-
 ## Data Setup Instructions
 
 Make sure raw NHTSA ODI zip files are in `data/raw/`.
@@ -738,7 +462,7 @@ Authoritative schema/data dictionary references used by the project:
 
 Use these docs when proposing schema changes, writing cleaning rules, or debugging missing/renamed columns.
 
-Preferred complaint filenames for team consistency:
+Preferred complaint filenames:
 
 - `data/raw/COMPLAINTS_RECEIVED_2020-2024.zip`
 - `data/raw/COMPLAINTS_RECEIVED_2025-2026.zip`
@@ -756,17 +480,15 @@ Important local-processing design choices:
 - run manifests/summaries are written locally to `data/outputs/`
 - these derived folders are ignored by Git to avoid oversized commits and GitHub file-size issues
 
-## How To Run The Project (Standard Workflow)
+## How To Run The Project
 
-### Standard script order
+### Official execution order
 
-1. Run setup script (`setup_env_*`)
-2. Confirm verification passes (`verify_install.py` runs automatically)
-3. Run ingest if you need to rebuild complaint inputs (`run_ingest_*`)
-4. Run the official model pipeline you need:
+1. Run ingest if you need to rebuild complaint inputs (`run_ingest_*`)
+2. Run the official pipeline you need:
    component (`run_component_official_*`), severity (`run_severity_official_*`), or NLP early warning (`run_nlp_official_*`)
-5. Inspect outputs in `data/processed/` and manifests in `data/outputs/`
-6. Use notebooks or experiment scripts only when you intentionally want exploratory work
+3. Inspect outputs in `data/processed/`, `data/outputs/`, and `docs/figures/`
+4. Use notebooks or archive experiment scripts only when you intentionally want review or exploratory work
 
 ### Run ingest only (Windows)
 
@@ -882,12 +604,6 @@ This one step writes the cleaned complaints table, the severity cases table, the
 .\.venv\Scripts\python.exe -m src.reporting.watchlist_visuals
 ```
 
-#### Refresh generated reporting
-
-```powershell
-.\.venv\Scripts\python.exe -m src.reporting.update_component_readme
-```
-
 #### Generate component presentation figures
 
 ```powershell
@@ -900,9 +616,15 @@ This one step writes the cleaned complaints table, the severity cases table, the
 .\.venv\Scripts\python.exe -m src.reporting.severity_visuals
 ```
 
+#### Refresh generated reporting
+
+```powershell
+.\.venv\Scripts\python.exe -m src.reporting.update_component_readme
+```
+
 ### Run archive experiment entrypoints manually
 
-These scripts are archived under `notebooks/archive/`. They remain useful for historical comparisons and heavier experimentation, but they are not part of the official reporting contract.
+These scripts are archived under `notebooks/archive/`. They remain useful for historical comparisons and heavier experimentation, but they are not part of the official reporting contract. Check first to see if your GPU is compatible and, if so, use `--task-type GPU` for reasonable run times.
 
 #### Structured single-label tuning
 
@@ -929,228 +651,3 @@ These scripts are archived under `notebooks/archive/`. They remain useful for hi
 ```
 
 The official pipeline commands above produce the benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/`, `docs/figures/severity_model/`, and `docs/figures/nlp_early_warning/`. The archive scripts write their own exploratory manifests and tables, but those are not part of the supported reporting surface.
-
-## Git Basics Overview
-
-### VS Code Source Control
-
-Most teammates can do daily Git work using the VS Code Source Control panel:
-
-1. Click the Source Control icon on the left sidebar (3rd from the top)
-2. Review changed files
-3. Stage files by clicking `+` (shows by hovering over file name, or all at once by hovering over `Changes`)
-4. Enter a commit message
-5. Click `Commit`
-6. Click `Sync Changes` (or `Push`) to upload your branch
-7. Click `Pull` before starting work or before pushing if others may have updated the branch
-
-Good habit before you start coding:
-
-- open Source Control
-- click `Pull` (or `Sync Changes`)
-- confirm no incoming changes remain
-
-### Command Line Git commands (examples)
-
-Check your state:
-
-```bash
-git status
-git status -sb
-```
-
-Pull latest changes for your current branch:
-
-```bash
-git pull
-```
-
-Stage + commit + push:
-
-```bash
-git add .
-git commit -m "Add initial ODI preprocessing notebook scaffold"
-git push
-```
-
-### Branch workflow
-
-Do not do project work directly on `main`.
-
-Use this workflow instead:
-
-1. Update `main`
-2. Create a branch from `main`
-3. Do your work on that branch
-4. Commit your changes
-5. Pull the latest `main` into your branch before finishing
-6. Push your branch to GitHub
-
-### Create a new branch (Command Line version)
-
-Start from an up-to-date `main` branch:
-
-```bash
-git switch main
-git pull origin main
-git switch -c feature/short-description
-```
-
-Example:
-
-```bash
-git switch main
-git pull origin main
-git switch -c feature/schema-quality-checks
-```
-
-### Create a new branch (VS Code)
-
-1. Make sure you are on `main` (check the branch name in the bottom-left of VS Code)
-2. Pull latest changes on `main` (`Source Control` -> `...` menu -> `Pull`, or click `Sync Changes`)
-3. Click the branch name in the bottom-left status bar
-4. Choose `Create new branch...`
-5. Name it something like `feature/...`, `eda/...`, or `docs/...`
-
-### Work on your branch and commit changes
-
-Example Command Line flow while working:
-
-```bash
-git status
-git add .
-git commit -m "Add complaint schema validation summaries"
-```
-
-You can make multiple commits on the same branch while you work.
-
-### Proper way to pull `main` into your branch (before finishing or opening a PR)
-
-This helps reduce merge conflicts and makes sure your branch includes recent team changes.
-
-Important first step:
-
-- Commit your work (or stash it) before updating from `main`
-
-Recommended Command Line workflow (merge `main` into your branch):
-
-```bash
-git switch main
-git pull origin main
-git switch feature/short-description
-git merge main
-```
-
-Alternative (equivalent result, fewer branch switches):
-
-```bash
-git fetch origin
-git switch feature/short-description
-git merge origin/main
-```
-
-If there are merge conflicts:
-
-1. Open the conflicted files in VS Code
-2. Use the conflict resolution buttons (`Accept Current`, `Accept Incoming`, `Accept Both`) carefully
-3. Run `git status` to confirm what is still unresolved
-4. Stage resolved files
-5. Commit the merge (if Git does not auto-create the commit for you)
-
-Example conflict-resolution finish:
-
-```bash
-git add .
-git commit -m "Merge main into feature/short-description"
-```
-
-VS Code way to bring `main` into your branch:
-
-1. Commit or stash your current changes on your branch
-2. Switch to `main`
-3. Pull latest `main`
-4. Switch back to your branch
-5. Open Command Palette and run `Git: Merge Branch...`
-6. Select `main`
-7. Resolve conflicts if prompted
-
-### Push your branch when you are finished (or ready for review)
-
-First push of a new branch (sets the upstream tracking branch):
-
-```bash
-git push -u origin feature/short-description
-```
-
-Later pushes on the same branch:
-
-```bash
-git push
-```
-
-VS Code push flow:
-
-1. Commit your changes
-2. Click `Publish Branch` (first push) or `Sync Changes` / `Push` (later pushes)
-3. Confirm the branch name matches your feature branch, not `main`
-
-### End-of-work checklist for teammates
-
-Before you say "I'm done", do this:
-
-1. `git status` is clean (or only shows files you intentionally left uncommitted)
-2. You pulled/merged latest `main` into your branch
-3. You resolved any conflicts
-4. You pushed your branch to GitHub
-5. You shared the branch name with the team (or opened a PR, if using PRs)
-
-### How to tell if the branch was updated and you need to pull
-
-In VS Code:
-
-- the status bar / Source Control view may show incoming changes
-- the `Sync`/cloud arrows indicator can show incoming commits
-- after clicking `Refresh` or `Fetch`, if you see incoming changes, pull first
-
-In Command Line (more explicit):
-
-```bash
-git fetch
-git status -sb
-git branch -vv
-```
-
-If your branch line shows it is behind `origin/<branch>` (for example `behind 2`), you need to pull.
-
-You can also inspect incoming commits directly:
-
-```bash
-git log --oneline HEAD..origin/<your-branch-name>
-```
-
-If this prints commits, your local branch is behind the remote branch.
-
-## Team Workflow Rules
-
-Use these rules to reduce merge conflicts and lost work in a class group setting:
-
-1. Pull before you start work each session
-2. Create a branch for your task (do not do all work on the shared branch)
-3. Keep commits small and focused (one topic per commit when possible)
-4. Avoid editing the same file as someone else at the same time
-5. Do not edit or rewrite committed raw zip files in `data/raw/`
-6. Do not commit `data/extracted/`, `data/processed/`, or `data/outputs/` artifacts
-7. If you change shared schemas or feature logic, document the change in your PR/commit message
-8. Pull again before pushing if you were working for a while
-9. If you add a pure exploration notebook, mark it in `.gitattributes` so outputs are auto-cleared on commit
-
-## Repo Guardrails
-
-These repo-side guardrails are part of the workflow:
-
-- `CODEOWNERS` assigns the team lead as the default code owner across the repo
-- PRs use a shared checklist through `.github/pull_request_template.md`
-- GitHub Actions runs `.github/workflows/pr-ci.yml` on PRs and on `main`
-- `scripts/check_repo_integrity.py` checks raw zip hashes and notebook hygiene
-- Exploration notebooks listed in `.gitattributes` are auto-cleared on commit
-- Report/presentation notebooks can keep outputs by default
