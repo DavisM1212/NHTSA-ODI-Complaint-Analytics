@@ -84,6 +84,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 
 - `src/modeling/component_single_text_calibrated.py`
 - `src/modeling/component_multi_routing.py`
+- `src/modeling/nlp_early_warning_system.py`
 - `src/modeling/severity_urgency_model.py`
 - `src/modeling/common/helpers.py`
 - `src/modeling/common/text_fusion.py`
@@ -143,6 +144,33 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 - The official severity model is a tuned calibrated late-fusion urgency model on `odi_severity_cases`
 - Archived experiments and their helpers live under `notebooks/archive/`
 
+### NLP early-warning official model
+
+**Reads**
+
+- `data/processed/odi_component_multilabel_cases.parquet`
+- `data/processed/odi_component_text_sidecar.parquet`
+
+**Writes**
+
+- `data/processed/odi_nlp_prepped.parquet`
+- `data/outputs/nlp_early_warning_official_manifest.json`
+- `data/outputs/nlp_early_warning_topic_model_scan.csv`
+- `data/outputs/nlp_early_warning_topic_library.csv`
+- `data/outputs/nlp_early_warning_complaint_topics.parquet`
+- `data/outputs/nlp_early_warning_watchlist.csv`
+- `data/outputs/nlp_early_warning_watchlist_summary.csv`
+- `data/outputs/nlp_early_warning_risk_monitor.csv`
+- `data/outputs/nlp_early_warning_recurring_large_signals.csv`
+- `data/outputs/nlp_early_warning_terms.csv`
+
+**Notes**
+
+- The official NLP path rebuilds the complaint-level NLP cache on every run from the authoritative processed component inputs
+- The official topic model uses lemma-based TF-IDF plus NMF with a locked 20-topic library
+- The official deliverable is the cohort-level emerging watchlist plus a summary view, risk monitor, recurring-signal companion table, and supporting clue terms
+- The notebook remains a review surface; it is not the source of truth for the hardened NLP logic
+
 ---
 
 ## Stage 4: Reporting
@@ -151,6 +179,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 
 - `src/reporting/component_visuals.py`
 - `src/reporting/severity_visuals.py`
+- `src/reporting/watchlist_visuals.py`
 - `src/reporting/update_component_readme.py`
 
 **Reads**
@@ -164,6 +193,8 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 - `docs/figures/component_models/component_model_figure_index.csv`
 - `docs/figures/severity_model/*.png`
 - `docs/figures/severity_model/severity_model_figure_index.csv`
+- `docs/figures/nlp_early_warning/*.png`
+- `docs/figures/nlp_early_warning/nlp_early_warning_figure_index.csv`
 - `data/outputs/component_official_benchmark_summary.csv`
 - `data/outputs/component_official_benchmark_summary.json`
 - Updated `README.md` benchmark block
@@ -194,6 +225,7 @@ src/
 |-- modeling/
 |   |-- component_single_text_calibrated.py
 |   |-- component_multi_routing.py
+|   |-- nlp_early_warning_system.py
 |   |-- severity_urgency_model.py
 |   `-- common/
 |       |-- helpers.py
@@ -201,6 +233,7 @@ src/
 `-- reporting/
     |-- component_visuals.py
     |-- severity_visuals.py
+    |-- watchlist_visuals.py
     `-- update_component_readme.py
 ```
 
@@ -214,8 +247,10 @@ python -m src.preprocessing.clean_complaints
 python -m src.modeling.severity_urgency_model
 python -m src.modeling.component_single_text_calibrated
 python -m src.modeling.component_multi_routing
+python -m src.modeling.nlp_early_warning_system
 python -m src.reporting.component_visuals
 python -m src.reporting.severity_visuals
+python -m src.reporting.watchlist_visuals
 python -m src.reporting.update_component_readme
 ```
 

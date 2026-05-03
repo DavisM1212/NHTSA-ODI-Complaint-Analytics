@@ -1,0 +1,6 @@
+figure,path,title,description
+nlp_watchlist_latest_leaderboard,docs/figures/nlp_early_warning/nlp_watchlist_latest_leaderboard.png,Current Emerging Signal Leaderboard,Top latest-month cohort-topic watchlist signals ranked by rolled-up complaints and colored by signal tier
+nlp_watchlist_latest_topic_mix,docs/figures/nlp_early_warning/nlp_watchlist_latest_topic_mix.png,Latest Watchlist Topic Mix,"Top latest-month defect themes by rolled-up complaints, annotated with the number of flagged cohorts they drive"
+nlp_watchlist_topic_share_shift,docs/figures/nlp_early_warning/nlp_watchlist_topic_share_shift.png,Topic Share Shift Into The Forward Period,Development-versus-forward complaint share shift for the top defect-watchlist topics in the locked NMF library
+nlp_watchlist_recurring_large_signals,docs/figures/nlp_early_warning/nlp_watchlist_recurring_large_signals.png,Recurring Large Signals Across Many Months,"Top recurring cohort-topic signals shown as a bubble chart where x is months flagged, y is peak flagged-month complaints, and bubble size is max watchlist score"
+nlp_watchlist_recent_signal_flow,docs/figures/nlp_early_warning/nlp_watchlist_recent_signal_flow.png,Recent Signal Trend In The Official NLP Watchlist,Recent 14-month cadence of emerging watchlist rows by tier alongside complaint volume in the summary watchlist and risk monitor

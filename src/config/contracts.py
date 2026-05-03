@@ -13,6 +13,7 @@ SEVERITY_CASES_STEM = 'odi_severity_cases'
 COMPONENT_SINGLE_LABEL_CASES_STEM = 'odi_component_single_label_cases'
 COMPONENT_MULTILABEL_CASES_STEM = 'odi_component_multilabel_cases'
 COMPONENT_TEXT_SIDECAR_STEM = 'odi_component_text_sidecar'
+NLP_PREPPED_STEM = 'odi_nlp_prepped'
 
 
 # -----------------------------------------------------------------------------
@@ -61,6 +62,16 @@ SEVERITY_URGENCY_OFFICIAL_MANIFEST = 'severity_urgency_official_manifest.json'
 SEVERITY_URGENCY_OFFICIAL_METRICS = 'severity_urgency_official_metrics.csv'
 SEVERITY_URGENCY_OFFICIAL_REVIEW_BUDGETS = 'severity_urgency_official_review_budgets.csv'
 SEVERITY_URGENCY_OFFICIAL_CALIBRATION = 'severity_urgency_official_calibration.csv'
+
+NLP_EARLY_WARNING_OFFICIAL_MANIFEST = 'nlp_early_warning_official_manifest.json'
+NLP_EARLY_WARNING_TOPIC_SCAN = 'nlp_early_warning_topic_model_scan.csv'
+NLP_EARLY_WARNING_TOPIC_LIBRARY = 'nlp_early_warning_topic_library.csv'
+NLP_EARLY_WARNING_COMPLAINT_TOPICS = 'nlp_early_warning_complaint_topics.parquet'
+NLP_EARLY_WARNING_WATCHLIST = 'nlp_early_warning_watchlist.csv'
+NLP_EARLY_WARNING_WATCHLIST_SUMMARY = 'nlp_early_warning_watchlist_summary.csv'
+NLP_EARLY_WARNING_RISK_MONITOR = 'nlp_early_warning_risk_monitor.csv'
+NLP_EARLY_WARNING_RECURRING_SIGNALS = 'nlp_early_warning_recurring_large_signals.csv'
+NLP_EARLY_WARNING_TERMS = 'nlp_early_warning_terms.csv'
 
 
 # -----------------------------------------------------------------------------

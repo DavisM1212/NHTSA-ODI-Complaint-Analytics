@@ -9,7 +9,7 @@ This repository is designed for a DSBA 6156 (Machine Learning) group project. Th
 - easy local extraction, cleaning, and modeling of ODI complaint data
 - reproducible scripts and shared conventions
 
-The current workflow already covers complaint ingestion, EDA, audited cleaning, lean shared complaint contracts, an official severity urgency pipeline, single-label and multi-label component target construction, and one official component reporting pipeline. The main remaining modeling area is NLP-driven early warning beyond component classification.
+The current workflow already covers complaint ingestion, EDA, audited cleaning, lean shared complaint contracts, an official severity urgency pipeline, single-label and multi-label component target construction, one official component reporting pipeline, and an official NLP early-warning pipeline for cohort-level emerging safety signals.
 
 ## Project Overview
 
@@ -46,20 +46,22 @@ The repo has stable, production-ready pipelines for severity urgency scoring and
 - `src/modeling/severity_urgency_model.py`: Official severity urgency benchmark (tuned text + structured late fusion)
 - `src/modeling/component_single_text_calibrated.py`: Official single-label component router (text + structured, late fusion)
 - `src/modeling/component_multi_routing.py`: Official multi-label component router (structured only)
+- `src/modeling/nlp_early_warning_system.py`: Official lemma-based NLP early-warning watchlist pipeline
 - Outputs: Model manifests, metrics, calibration, holdout predictions
 
 ### Stage 4: Reporting
 
 - `src/reporting/component_visuals.py`: Generate component confusion matrices, calibration plots, and benchmark visuals
 - `src/reporting/severity_visuals.py`: Generate severity benchmark, calibration, and review-budget visuals
+- `src/reporting/watchlist_visuals.py`: Generate official NLP early-warning watchlist figures
 - `src/reporting/update_component_readme.py`: Update README with latest results
-- Outputs: `docs/figures/component_models/*.png` and `docs/figures/severity_model/*.png`
+- Outputs: `docs/figures/component_models/*.png`, `docs/figures/severity_model/*.png`, and `docs/figures/nlp_early_warning/*.png`
 - Reporting keeps the Wave 2b calibration manifest as an input for the single-label lift figure
 
-### Future Work (WIP in notebooks)
+### Current notebook review surfaces
 
 - `notebooks/Severity_Ranking_Framework.ipynb`: Exploratory record for the hardened severity urgency model plus sensitivity runs
-- `notebooks/NLP_Early_Warning_Framework.ipynb`: Scaffold for anomaly detection (not yet pipeline-hardened)
+- `notebooks/NLP_Early_Warning_Framework.ipynb`: Review and analysis notebook for the official NLP early-warning pipeline plus exploratory topic/watchlist comparisons
 
 **See [src/PIPELINE.md](src/PIPELINE.md) for the live pipeline contract and execution instructions.**
 
@@ -151,7 +153,7 @@ Run the normal README setup and pipeline first, then open:
 - `notebooks/Severity_Ranking_Framework.ipynb`
 - `notebooks/NLP_Early_Warning_Framework.ipynb`
 
-Each notebook includes setup cells, data loading, short plain-English explanations, starter baselines, result-saving cells, and reflection prompts. The severity notebook uses the prepared severity case table and focuses on ranking uncommon high-risk complaints. The early-warning notebook builds a rule-based monthly watchlist from component cohorts, complaint growth, broad-severity rate, and narrative text clues.
+Each notebook includes setup cells, data loading, short plain-English explanations, starter baselines, result-saving cells, and reflection prompts. The severity notebook uses the prepared severity case table and focuses on ranking uncommon high-risk complaints. The early-warning notebook now acts as the main review surface for the official lemma-based monthly cohort-topic watchlist and companion summary tables.
 
 Expected inputs:
 
@@ -166,15 +168,31 @@ Official severity pipeline outputs:
 - `data/outputs/severity_urgency_official_review_budgets.csv`
 - `data/outputs/severity_urgency_official_calibration.csv`
 
+Official NLP early-warning pipeline outputs:
+
+- `data/processed/odi_nlp_prepped.parquet`
+- `data/outputs/nlp_early_warning_official_manifest.json`
+- `data/outputs/nlp_early_warning_topic_model_scan.csv`
+- `data/outputs/nlp_early_warning_topic_library.csv`
+- `data/outputs/nlp_early_warning_complaint_topics.parquet`
+- `data/outputs/nlp_early_warning_watchlist.csv`
+- `data/outputs/nlp_early_warning_watchlist_summary.csv`
+- `data/outputs/nlp_early_warning_risk_monitor.csv`
+- `data/outputs/nlp_early_warning_recurring_large_signals.csv`
+- `data/outputs/nlp_early_warning_terms.csv`
+
 Official severity figures:
 
 - `docs/figures/severity_model/*.png`
 
+Official NLP early-warning figures:
+
+- `docs/figures/nlp_early_warning/*.png`
+
 Notebook outputs:
 
 - `data/outputs/severity_partner_results.csv`
-- `data/outputs/nlp_early_warning_watchlist.csv`
-- `data/outputs/nlp_early_warning_terms.csv`
+- optional notebook-export CSVs under `notebooks/` for ad hoc review of the official NLP outputs
 
 ## Repository Structure
 
@@ -213,6 +231,8 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
 |   |-- run_severity_official_mac_linux.sh
 |   |-- run_component_official_windows.ps1
 |   |-- run_component_official_mac_linux.sh
+|   |-- run_nlp_official_windows.ps1
+|   |-- run_nlp_official_mac_linux.sh
 |   |-- verify_install.py
 |   |-- install_git_filters.py
 |   `-- git_notebook_filter.py
@@ -245,12 +265,14 @@ NHTSA-ODI-COMPLAINT-ANALYTICS/
     |   |-- severity_urgency_model.py
     |   |-- component_single_text_calibrated.py
     |   |-- component_multi_routing.py
+    |   |-- nlp_early_warning_system.py
     |   `-- common/
     |       |-- helpers.py
     |       `-- text_fusion.py
     `-- reporting/
         |-- component_visuals.py
         |-- severity_visuals.py
+        |-- watchlist_visuals.py
         `-- update_component_readme.py
 ```
 
@@ -453,6 +475,16 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - macOS/Linux official severity runner
 - Runs the durable severity pipeline end to end: ingest optional -> clean -> official severity model
 
+`scripts/run_nlp_official_windows.ps1`
+
+- Windows official NLP early-warning runner
+- Runs the durable NLP pipeline end to end: ingest optional -> clean -> lemma-based topic model -> official watchlist outputs -> official NLP figures
+
+`scripts/run_nlp_official_mac_linux.sh`
+
+- macOS/Linux official NLP early-warning runner
+- Runs the durable NLP pipeline end to end: ingest optional -> clean -> lemma-based topic model -> official watchlist outputs -> official NLP figures
+
 ### `notebooks/` (interactive, cell-by-cell exploration)
 
 `notebooks/EDA.ipynb`
@@ -477,10 +509,9 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 
 `notebooks/NLP_Early_Warning_Framework.ipynb`
 
-- Starting notebook for the NLP early-warning section
-- Loads `data/processed/odi_component_multilabel_cases.parquet` and `data/processed/odi_component_text_sidecar.parquet`
-- Builds a monthly make/model/model-year/component watchlist from complaint volume, growth, broad-severity rate, and simple text clues
-- Writes `data/outputs/nlp_early_warning_watchlist.csv` and `data/outputs/nlp_early_warning_terms.csv`
+- Review notebook for the official NLP early-warning system and follow-on exploratory comparisons
+- Loads the official lemma-based watchlist outputs plus the processed component inputs when needed for deeper inspection
+- Supports topic review, watchlist interpretation, and companion-table inspection without being the source of truth for the official pipeline
 
 ### `src/` ("source" folder, contains main Python files grouped by objective)
 
@@ -518,6 +549,7 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - `severity_urgency_model.py`: official severity urgency benchmark with one baseline and one tuned calibrated late-fusion path
 - `component_single_text_calibrated.py`: official calibrated single-label component benchmark
 - `component_multi_routing.py`: official multi-label routing benchmark
+- `nlp_early_warning_system.py`: official lemma-based NLP early-warning topic model and cohort watchlist pipeline
 - `common/helpers.py`: shared structured-model and split helpers
 - `common/text_fusion.py`: shared text and late-fusion helpers used by the official single-label path
 
@@ -597,7 +629,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Make scripts executable, then run setup:
 
 ```bash
-chmod +x scripts/setup_env_mac_linux.sh scripts/run_ingest_mac_linux.sh scripts/run_component_official_mac_linux.sh
+chmod +x scripts/setup_env_mac_linux.sh scripts/run_ingest_mac_linux.sh scripts/run_component_official_mac_linux.sh scripts/run_severity_official_mac_linux.sh scripts/run_nlp_official_mac_linux.sh
 ./scripts/setup_env_mac_linux.sh
 ```
 
@@ -649,6 +681,16 @@ What `scripts/verify_install.py` checks:
 - key project folders
 - presence of zip files in `data/raw/`
 - write access to `data/outputs/`
+
+The official NLP early-warning pipeline also requires the spaCy English model `en_core_web_sm`. Install it once after setup if you plan to run the NLP pipeline:
+
+```powershell
+.\.venv\Scripts\python.exe -m spacy download en_core_web_sm
+```
+
+```bash
+.venv/bin/python -m spacy download en_core_web_sm
+```
 
 If you skipped the setup script and created the environment manually, run this once to enable automatic output clearing for exploration notebooks:
 
@@ -720,7 +762,8 @@ Important local-processing design choices:
 1. Run setup script (`setup_env_*`)
 2. Confirm verification passes (`verify_install.py` runs automatically)
 3. Run ingest if you need to rebuild complaint inputs (`run_ingest_*`)
-4. Run the official component pipeline when you need the durable component artifacts (`run_component_official_*`)
+4. Run the official model pipeline you need:
+   component (`run_component_official_*`), severity (`run_severity_official_*`), or NLP early warning (`run_nlp_official_*`)
 5. Inspect outputs in `data/processed/` and manifests in `data/outputs/`
 6. Use notebooks or experiment scripts only when you intentionally want exploratory work
 
@@ -755,6 +798,12 @@ Optional flags:
 .\scripts\run_severity_official_windows.ps1
 ```
 
+### Run the official NLP early-warning pipeline (Windows)
+
+```powershell
+.\scripts\run_nlp_official_windows.ps1
+```
+
 ### Run the official component pipeline (macOS / Linux)
 
 ```bash
@@ -765,6 +814,12 @@ Optional flags:
 
 ```bash
 ./scripts/run_severity_official_mac_linux.sh
+```
+
+### Run the official NLP early-warning pipeline (macOS / Linux)
+
+```bash
+./scripts/run_nlp_official_mac_linux.sh
 ```
 
 ### What the ingestion step does
@@ -814,6 +869,18 @@ This one step writes the cleaned complaints table, the severity cases table, the
 .\.venv\Scripts\python.exe -m src.modeling.severity_urgency_model
 ```
 
+#### Official NLP early-warning pipeline
+
+```powershell
+.\.venv\Scripts\python.exe -m src.modeling.nlp_early_warning_system
+```
+
+#### Generate NLP early-warning presentation figures
+
+```powershell
+.\.venv\Scripts\python.exe -m src.reporting.watchlist_visuals
+```
+
 #### Refresh generated reporting
 
 ```powershell
@@ -860,7 +927,7 @@ These scripts are archived under `notebooks/archive/`. They remain useful for hi
 .\.venv\Scripts\python.exe notebooks/archive/component_text_wave2.py --task-type GPU --devices 0 --skip-text-plus --final-linear-model sgd
 ```
 
-The official pipeline commands above produce the benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/` and `docs/figures/severity_model/`. The archive scripts write their own exploratory manifests and tables, but those are not part of the supported reporting surface.
+The official pipeline commands above produce the benchmark tables, manifests, README summary artifacts, and presentation figures under `docs/figures/component_models/`, `docs/figures/severity_model/`, and `docs/figures/nlp_early_warning/`. The archive scripts write their own exploratory manifests and tables, but those are not part of the supported reporting surface.
 
 ## Git Basics Overview
 
