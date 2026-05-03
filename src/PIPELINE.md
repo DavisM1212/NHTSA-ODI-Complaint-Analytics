@@ -167,6 +167,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 **Notes**
 
 - The official NLP path rebuilds the complaint-level NLP cache on every run from the authoritative processed component inputs
+- The official NLP runner can reuse `data/processed/odi_nlp_prepped.parquet` via `--skip-cache-rebuild` when the cache already exists
 - The official topic model uses lemma-based TF-IDF plus NMF with a locked 20-topic library
 - The official deliverable is the cohort-level emerging watchlist plus a summary view, risk monitor, recurring-signal companion table, and supporting clue terms
 - The notebook remains a review surface; it is not the source of truth for the hardened NLP logic
@@ -202,7 +203,8 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 **Notes**
 
 - The Wave 2b calibration manifest remains a required reporting input for the single-label lift visual
-- README publishing is driven only by the official single-label and multi-label manifests
+- README benchmark publishing is driven by the official severity, single-label, and multi-label manifests through `src/reporting/update_component_readme.py`
+- The component benchmark summary CSV and JSON are derived from the official single-label and multi-label manifests
 
 ---
 

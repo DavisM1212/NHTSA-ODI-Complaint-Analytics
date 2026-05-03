@@ -35,8 +35,6 @@ tmp*/
 *.swo
 Thumbs.db
 .DS_Store
-CONSOLIDATION_COMPLETE.md
-work_so_far.txt
 
 # -----------------------------------------------------------------------------
 # Local analysis outputs and model artifacts
@@ -47,6 +45,7 @@ data/outputs/*
 models/
 artifacts/
 checkpoints/
+local_docs/
 *.pkl
 *.joblib
 *.onnx

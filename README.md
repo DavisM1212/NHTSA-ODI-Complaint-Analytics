@@ -29,7 +29,7 @@ Important data workflow rule:
 
 ## Current Status
 
-The repo has stable, production-ready pipelines for severity urgency scoring and component-level complaint routing. The workflow is organized into four clear stages:
+The repo has stable, production-ready pipelines for component-level complaint routing, severity urgency scoring, and NLP early-warning watchlists. The workflow is organized into four clear stages:
 
 ### Stage 1: Ingestion
 
@@ -47,7 +47,7 @@ The repo has stable, production-ready pipelines for severity urgency scoring and
 - `src/modeling/component_single_text_calibrated.py`: Official single-label component router (text + structured, late fusion)
 - `src/modeling/component_multi_routing.py`: Official multi-label component router (structured only)
 - `src/modeling/nlp_early_warning_system.py`: Official lemma-based NLP early-warning watchlist pipeline
-- Outputs: Model manifests, metrics, calibration, holdout predictions
+- Outputs: official manifests, metrics, calibration, holdout predictions, topic libraries, watchlists, and companion tables
 
 ### Stage 4: Reporting
 
@@ -58,10 +58,15 @@ The repo has stable, production-ready pipelines for severity urgency scoring and
 - Outputs: `docs/figures/component_models/*.png`, `docs/figures/severity_model/*.png`, and `docs/figures/nlp_early_warning/*.png`
 - Reporting keeps the Wave 2b calibration manifest as an input for the single-label lift figure
 
-### Current notebook review surfaces
+### Main notebooks
 
-- `notebooks/Severity_Ranking_Framework.ipynb`: Exploratory record for the hardened severity urgency model plus sensitivity runs
-- `notebooks/NLP_Early_Warning_Framework.ipynb`: Review and analysis notebook for the official NLP early-warning pipeline plus exploratory topic/watchlist comparisons
+- `notebooks/EDA.ipynb`: Structural audit, missingness review, anomaly checks, and visual data review
+- `notebooks/Cleaning.ipynb`: Cleaning decisions, issue flags, date handling, and target-construction review
+- `notebooks/Component_Modeling.ipynb`: Original component benchmark development notebook and supporting diagnosis surface
+- `notebooks/Severity_Ranking_Framework.ipynb`: Severity-model development, review-budget analysis, and sensitivity review notebook
+- `notebooks/NLP_Early_Warning_Framework.ipynb`: Topic-library review, watchlist interpretation, and NLP companion-table inspection notebook
+
+These notebooks were the project’s analysis, development, and review surfaces. The hardened `src/` pipelines and generated artifacts are the source of truth for official outputs.
 
 **See [src/PIPELINE.md](src/PIPELINE.md) for the live pipeline contract and execution instructions.**
 
@@ -144,55 +149,31 @@ These definitions explain the metrics and models used in the component-model rep
 | Late fusion | Combines scores from separately trained text and structured models. | Let the single-label model use narrative text while retaining structured vehicle/context signal. |
 | Power calibration | Adjusts probabilities to make confidence scores better match observed accuracy without changing prediction order. | Corrected the single-label text-fusion confidence scores while preserving top-k accuracy. |
 
-## Modeling Framework Notebooks
+## Notebook Inputs And Companion Outputs
 
-The next project sections are set up as runnable scaffold notebooks so others can contribute without needing to understand the full `src/` pipeline first.
+The five main notebooks are peer development and review surfaces. They sit on top of the same cleaned complaint tables and, where relevant, inspect the official modeling and reporting artifacts.
 
-Run the normal README setup and pipeline first, then open:
+Common processed inputs across the main notebooks include:
 
-- `notebooks/Severity_Ranking_Framework.ipynb`
-- `notebooks/NLP_Early_Warning_Framework.ipynb`
-
-Each notebook includes setup cells, data loading, short plain-English explanations, starter baselines, result-saving cells, and reflection prompts. The severity notebook uses the prepared severity case table and focuses on ranking uncommon high-risk complaints. The early-warning notebook now acts as the main review surface for the official lemma-based monthly cohort-topic watchlist and companion summary tables.
-
-Expected inputs:
-
+- `data/processed/odi_complaints_cleaned.parquet`
 - `data/processed/odi_severity_cases.parquet`
+- `data/processed/odi_component_single_label_cases.parquet`
 - `data/processed/odi_component_multilabel_cases.parquet`
 - `data/processed/odi_component_text_sidecar.parquet`
+- `data/processed/odi_nlp_prepped.parquet` when the official NLP cache is available
 
-Official severity pipeline outputs:
+Official artifacts most often reviewed in notebooks include:
 
-- `data/outputs/severity_urgency_official_manifest.json`
-- `data/outputs/severity_urgency_official_metrics.csv`
-- `data/outputs/severity_urgency_official_review_budgets.csv`
-- `data/outputs/severity_urgency_official_calibration.csv`
+- severity outputs under `data/outputs/severity_urgency_official_*.csv` and `.json`
+- component outputs under `data/outputs/component_*_official_*.csv` and `.json`
+- NLP outputs under `data/outputs/nlp_early_warning_*.csv`, `.json`, and `.parquet`
+- figure sets under `docs/figures/component_models/`, `docs/figures/severity_model/`, and `docs/figures/nlp_early_warning/`
 
-Official NLP early-warning pipeline outputs:
-
-- `data/processed/odi_nlp_prepped.parquet`
-- `data/outputs/nlp_early_warning_official_manifest.json`
-- `data/outputs/nlp_early_warning_topic_model_scan.csv`
-- `data/outputs/nlp_early_warning_topic_library.csv`
-- `data/outputs/nlp_early_warning_complaint_topics.parquet`
-- `data/outputs/nlp_early_warning_watchlist.csv`
-- `data/outputs/nlp_early_warning_watchlist_summary.csv`
-- `data/outputs/nlp_early_warning_risk_monitor.csv`
-- `data/outputs/nlp_early_warning_recurring_large_signals.csv`
-- `data/outputs/nlp_early_warning_terms.csv`
-
-Official severity figures:
-
-- `docs/figures/severity_model/*.png`
-
-Official NLP early-warning figures:
-
-- `docs/figures/nlp_early_warning/*.png`
-
-Notebook outputs:
+Notebook-specific companion outputs still kept in the repo contract include:
 
 - `data/outputs/severity_partner_results.csv`
-- optional notebook-export CSVs under `notebooks/` for ad hoc review of the official NLP outputs
+- `data/outputs/severity_broad_sensitivity.csv`
+- optional notebook-export CSVs under `notebooks/` for ad hoc review tables
 
 ## Repository Structure
 
@@ -485,31 +466,31 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 - macOS/Linux official NLP early-warning runner
 - Runs the durable NLP pipeline end to end: ingest optional -> clean -> lemma-based topic model -> official watchlist outputs -> official NLP figures
 
-### `notebooks/` (interactive, cell-by-cell exploration)
+### `notebooks/` (interactive, cell-by-cell analysis and review)
 
 `notebooks/EDA.ipynb`
 
-- Main exploratory notebook for structural audit, missingness review, anomaly checks, and visual EDA
+- Main analysis notebook for structural audit, missingness review, anomaly checks, and visual EDA
 
 `notebooks/Cleaning.ipynb`
 
-- Decision notebook for cleaning logic, issue flags, date handling, component grouping, and vehicle-first modeling choices
+- Main analysis notebook for cleaning logic, issue flags, date handling, component grouping, and vehicle-first modeling choices
 
 `notebooks/Component_Modeling.ipynb`
 
-- Exploratory notebook for the original single-label structured benchmark
+- Main analysis notebook for the original single-label structured benchmark
 - Useful for diagnosis and ideas, but not the source of truth for published benchmark numbers
 
 `notebooks/Severity_Ranking_Framework.ipynb`
 
-- Main exploratory notebook for the severity-ranking section
+- Main analysis notebook for the severity-ranking section
 - Loads `data/processed/odi_severity_cases.parquet`
-- Documents the final urgency-rule modeling path, the failed but useful experiments, and the broad-target sensitivity run
+- Documents the final urgency-rule modeling path, supporting comparisons, and the broad-target sensitivity run
 - Writes `data/outputs/severity_partner_results.csv`
 
 `notebooks/NLP_Early_Warning_Framework.ipynb`
 
-- Review notebook for the official NLP early-warning system and follow-on exploratory comparisons
+- Main analysis notebook for the official NLP early-warning system and companion comparisons
 - Loads the official lemma-based watchlist outputs plus the processed component inputs when needed for deeper inspection
 - Supports topic review, watchlist interpretation, and companion-table inspection without being the source of truth for the official pipeline
 
@@ -677,12 +658,14 @@ If you skipped the setup script and created the environment manually, run this o
 What `scripts/verify_install.py` checks:
 
 - Python version (warns if not exactly `3.13.12`)
-- core imports (`pandas`, `numpy`, `sklearn`, `matplotlib`, `pyarrow`)
+- supported runtime imports (`pandas`, `numpy`, `sklearn`, `matplotlib`, `pyarrow`, `catboost`, `spacy`)
+- optional notebook plotting import (`seaborn`) with a warning if it is missing
+- spaCy English model availability for the official NLP path (`en_core_web_sm`) with an install warning if it is missing
 - key project folders
 - presence of zip files in `data/raw/`
 - write access to `data/outputs/`
 
-The official NLP early-warning pipeline also requires the spaCy English model `en_core_web_sm`. Install it once after setup if you plan to run the NLP pipeline:
+The official NLP early-warning pipeline requires the spaCy English model `en_core_web_sm`. Install it once after setup if you plan to run the NLP pipeline:
 
 ```powershell
 .\.venv\Scripts\python.exe -m spacy download en_core_web_sm

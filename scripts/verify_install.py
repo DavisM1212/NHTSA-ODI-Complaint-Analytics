@@ -7,6 +7,7 @@ from pathlib import Path
 # Configuration
 # -----------------------------------------------------------------------------
 TARGET_PYTHON_VERSION = "3.13.12"
+SPACY_MODEL_NAME = "en_core_web_sm"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_DIRS = [
     "docs",
@@ -19,7 +20,7 @@ REQUIRED_DIRS = [
     "scripts"
 ]
 
-REQUIRED_IMPORTS = ["pandas", "numpy", "sklearn", "matplotlib", "pyarrow", "catboost", "optuna"]
+REQUIRED_IMPORTS = ["pandas", "numpy", "sklearn", "matplotlib", "pyarrow", "catboost", "spacy"]
 
 OPTIONAL_IMPORTS = ["seaborn"]
 
@@ -82,7 +83,7 @@ def check_imports(results):
             results["passes"].append(f"Optional import OK: {module_name}")
         except Exception:
             results["warnings"].append(
-                f"Optional package not installed: {module_name} (plots will still work without it)"
+                f"Optional package not installed: {module_name} (main notebooks use it, but the official src pipelines do not require it)"
             )
 
 
@@ -93,6 +94,20 @@ def check_directories(results):
             results["passes"].append(f"Directory exists: {relative_path}")
         else:
             results["failures"].append(f"Missing directory: {relative_path}")
+
+
+def check_spacy_model(results):
+    try:
+        spacy = importlib.import_module("spacy")
+        spacy.load(SPACY_MODEL_NAME, disable=["ner", "parser"])
+        results["passes"].append(f"spaCy model OK: {SPACY_MODEL_NAME}")
+    except Exception as exc:
+        results["warnings"].append(
+            f"spaCy model not available: {SPACY_MODEL_NAME} ({exc})"
+        )
+        results["actions"].append(
+            f"Install the spaCy English model if you plan to run the official NLP pipeline: python -m spacy download {SPACY_MODEL_NAME}"
+        )
 
 
 def check_raw_data(results):
@@ -156,6 +171,9 @@ def main():
 
     print_section("Folders")
     check_directories(results)
+
+    print_section("spaCy model")
+    check_spacy_model(results)
 
     print_section("Data")
     check_raw_data(results)
