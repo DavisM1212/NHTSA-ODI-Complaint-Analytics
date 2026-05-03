@@ -57,13 +57,23 @@ local_docs/
 .vscode/*.code-workspace
 
 # -----------------------------------------------------------------------------
-# Do not ignore documentation screenshots or committed raw zip files
+# Do not ignore committed raw zip files
 # -----------------------------------------------------------------------------
-!docs/screenshots/
-!docs/screenshots/**
 !data/raw/
 !data/raw/**
 !data/raw/*.zip
 !.gitkeep
+
+# -----------------------------------------------------------------------------
+# Canonical official reporting artifacts kept in git
+# -----------------------------------------------------------------------------
 !data/outputs/*official*
 !data/outputs/component_textwave2b_calibration_manifest.json
+!data/outputs/nlp_early_warning_topic_model_scan.csv
+!data/outputs/nlp_early_warning_topic_library.csv
+!data/outputs/nlp_early_warning_watchlist.csv
+!data/outputs/nlp_early_warning_watchlist_summary.csv
+!data/outputs/nlp_early_warning_risk_monitor.csv
+!data/outputs/nlp_early_warning_recurring_large_signals.csv
+!data/outputs/nlp_early_warning_terms.csv
+

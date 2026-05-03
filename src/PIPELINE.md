@@ -170,6 +170,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 - The official NLP runner can reuse `data/processed/odi_nlp_prepped.parquet` via `--skip-cache-rebuild` when the cache already exists
 - The official topic model uses lemma-based TF-IDF plus NMF with a locked 20-topic library
 - The official deliverable is the cohort-level emerging watchlist plus a summary view, risk monitor, recurring-signal companion table, and supporting clue terms
+- The committed canonical NLP reporting surface is the manifest, topic scan, topic library, watchlist CSVs, risk monitor, recurring signals, clue terms, and figure outputs; `nlp_early_warning_complaint_topics.parquet` remains a generated audit artifact and is not committed by default
 - The notebook remains a review surface; it is not the source of truth for the hardened NLP logic
 
 ---

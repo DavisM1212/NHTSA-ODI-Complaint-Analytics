@@ -349,15 +349,13 @@ def update_component_readme(
 
     single_manifest = validate_single_manifest(load_manifest(single_path))
     multi_manifest = validate_multi_manifest(load_manifest(multi_path))
-    severity_manifest = None
-    if severity_manifest_path is not None:
-        severity_manifest = validate_severity_manifest(load_manifest(severity_manifest_path))
-    nlp_manifest = None
-    nlp_watchlist_summary = None
-    if nlp_manifest_path is not None:
-        nlp_manifest = validate_nlp_manifest(load_manifest(nlp_manifest_path))
-    if nlp_watchlist_summary_path is not None:
-        nlp_watchlist_summary = load_watchlist_summary(nlp_watchlist_summary_path)
+    severity_path = Path(severity_manifest_path) if severity_manifest_path is not None else OUTPUTS_DIR / SEVERITY_URGENCY_OFFICIAL_MANIFEST
+    nlp_path = Path(nlp_manifest_path) if nlp_manifest_path is not None else OUTPUTS_DIR / NLP_EARLY_WARNING_OFFICIAL_MANIFEST
+    nlp_summary_path = Path(nlp_watchlist_summary_path) if nlp_watchlist_summary_path is not None else OUTPUTS_DIR / NLP_EARLY_WARNING_WATCHLIST_SUMMARY
+
+    severity_manifest = validate_severity_manifest(load_manifest(severity_path))
+    nlp_manifest = validate_nlp_manifest(load_manifest(nlp_path))
+    nlp_watchlist_summary = load_watchlist_summary(nlp_summary_path)
     block = build_readme_block(
         severity_manifest=severity_manifest,
         single_manifest=single_manifest,
@@ -380,7 +378,7 @@ def update_component_readme(
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Update the README benchmark section from the official severity and component artifacts'
+        description='Update the README benchmark section from the official severity, component, and NLP artifacts'
     )
     parser.add_argument('--single-manifest', default=None)
     parser.add_argument('--multi-manifest', default=None)

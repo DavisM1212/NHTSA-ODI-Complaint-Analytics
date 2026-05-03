@@ -1,4 +1,4 @@
-# NHTSA ODI Complaint Analytics
+﻿# NHTSA ODI Complaint Analytics
 
 Professional-grade data science workspace for analyzing National Highway Traffic Safety Administration (NHTSA) Office of Defects Investigation (ODI) consumer complaint data, with a focus on reproducible workflows, explainable analyses, and leakage-aware modeling for vehicle safety signal detection.
 
@@ -29,7 +29,7 @@ Important data workflow rule:
 
 ## Current Status
 
-The repo has stable, production-ready pipelines for component-level complaint routing, severity urgency scoring, and NLP early-warning watchlists. The workflow is organized into four clear stages:
+The repo has stable, production-ready pipelines for component-level complaint routing, severity urgency scoring, and NLP early-warning watchlists. The locked final repo surface is the official severity urgency benchmark, the single-label and multi-label component benchmarks, and the official lemma-based NLP early-warning watchlist pipeline. The workflow is organized into four clear stages:
 
 ### Stage 1: Ingestion
 
@@ -54,8 +54,8 @@ The repo has stable, production-ready pipelines for component-level complaint ro
 - `src/reporting/component_visuals.py`: Generate component confusion matrices, calibration plots, and benchmark visuals
 - `src/reporting/severity_visuals.py`: Generate severity benchmark, calibration, and review-budget visuals
 - `src/reporting/watchlist_visuals.py`: Generate official NLP early-warning watchlist figures
-- `src/reporting/update_component_readme.py`: Update README with latest results
-- Outputs: `docs/figures/component_models/*.png`, `docs/figures/severity_model/*.png`, and `docs/figures/nlp_early_warning/*.png`
+- `src/reporting/update_component_readme.py`: Update the generated README benchmark snapshot and component summary artifacts
+- Outputs: `docs/figures/component_models/*.png`, `docs/figures/component_models/component_model_figure_index.csv`, `docs/figures/severity_model/*.png`, `docs/figures/severity_model/severity_model_figure_index.csv`, `docs/figures/nlp_early_warning/*.png`, `docs/figures/nlp_early_warning/nlp_early_warning_figure_index.csv`, `data/outputs/component_official_benchmark_summary.csv`, `data/outputs/component_official_benchmark_summary.json`, and the updated `README.md` benchmark block
 - Reporting keeps the Wave 2b calibration manifest as an input for the single-label lift figure
 
 ### Main notebooks
@@ -66,7 +66,7 @@ The repo has stable, production-ready pipelines for component-level complaint ro
 - `notebooks/Severity_Ranking_Framework.ipynb`: Severity-model development, review-budget analysis, and sensitivity review notebook
 - `notebooks/NLP_Early_Warning_Framework.ipynb`: Topic-library review, watchlist interpretation, and NLP companion-table inspection notebook
 
-These notebooks were the project’s analysis, development, and review surfaces. The hardened `src/` pipelines and generated artifacts are the source of truth for official outputs.
+These notebooks were the project's analysis, development, and review surfaces. The hardened `src/` pipelines and generated artifacts are the source of truth for official outputs.
 
 **See [src/PIPELINE.md](src/PIPELINE.md) for the live pipeline contract and execution instructions.**
 
@@ -554,9 +554,10 @@ This section is intentionally detailed for people who may be unfamiliar with Pyt
 `src/reporting/`
 
 - Reproducible tables/figures/report outputs for presentations and writeups
-- `update_component_readme.py`: refreshes the generated component benchmark block and official summary artifacts
+- `update_component_readme.py`: refreshes the generated README benchmark snapshot and official component summary artifacts
 - `component_visuals.py`: generates presentation-ready figures for the locked component-model results
 - `severity_visuals.py`: generates presentation-ready figures for the locked severity urgency model
+- `watchlist_visuals.py`: generates presentation-ready figures for the locked NLP early-warning watchlist outputs
 
 ### Quick rule of thumb for beginners
 
