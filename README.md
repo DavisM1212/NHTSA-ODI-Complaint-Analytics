@@ -73,7 +73,7 @@ These notebooks were the project’s analysis, development, and review surfaces.
 <!-- COMPONENT_BENCHMARK_START -->
 ### Generated Benchmark Snapshot
 
-This section is generated from the official severity and component benchmark artifacts in `data/outputs/`.
+This section is generated from the official severity, component, and NLP early-warning artifacts in `data/outputs/`.
 Severity reports the locked primary-target urgency rule on `valid_2025` plus the `2026` reference check.
 The published component-model scores come from the untouched `2026` holdout.
 
@@ -116,6 +116,23 @@ The published component-model scores come from the untouched `2026` holdout.
 - Holdout recall@3: `0.6751`
 - Holdout precision@3: `0.3027`
 - Release status: `official`
+
+#### NLP early-warning snapshot
+
+- Scope: `official lemma-based NLP early-warning pipeline`
+- Locked topic count: `20`
+- Development window end: `2024-12`
+- Forward watchlist window start: `2025-01`
+- Latest watchlist month: `2026-02`
+- Watchlist rows: `7364`
+- Risk monitor rows: `1359`
+- Recurring large-signal rows: `3201`
+
+Latest-month signal examples:
+
+- `FORD F-150 2017` | `Transmission shifting / gear engagement issue` | `39` complaints | `High-confidence signal`
+- `MAZDA CX-90 2024` | `Steering wheel binding / difficult turning issue` | `18` complaints | `High-confidence signal`
+- `HYUNDAI IONIQ 5 2024` | `Electric power steering assist loss` | `7` complaints | `Moderate signal`
 
 <!-- COMPONENT_BENCHMARK_END -->
 

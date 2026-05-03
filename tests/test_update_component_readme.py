@@ -90,6 +90,34 @@ def build_severity_manifest():
     }
 
 
+def build_nlp_manifest():
+    return {
+        'scope': 'official lemma-based NLP early-warning pipeline',
+        'publish_status': 'official',
+        'latest_watchlist_month': '2026-02-01',
+        'time_windows': {
+            'development_end': '2024-12-31 00:00:00',
+            'forward_start': '2025-01-01 00:00:00'
+        },
+        'topic_model': {
+            'locked_topic_k': 20
+        },
+        'row_counts': {
+            'watchlist_rows': 7364,
+            'risk_monitor_rows': 1359,
+            'recurring_large_signal_rows': 3201
+        }
+    }
+
+
+def build_nlp_watchlist_summary():
+    return """month,mfr_name,maketxt,modeltxt,yeartxt,topic_id,topic_label,component_groups,complaints,unique_states,max_component_watchlist_score,avg_topic_strength,severity_broad_rate,critical_event_near_operation_rate,highway_rate,high_speed_rate,best_signal_tier
+2026-02-01,FORD MOTOR COMPANY,FORD,F-150,2017,6,Transmission shifting / gear engagement issue,POWER TRAIN,39,21,24.1001,0.51,0.0,0.05,0.18,0.28,High-confidence signal
+2026-02-01,MAZDA MOTOR CORP.,MAZDA,CX-90,2024,10,Steering wheel binding / difficult turning issue,STEERING,18,14,17.8027,0.57,0.0,0.0,0.17,0.17,High-confidence signal
+2026-02-01,HYUNDAI MOTOR AMERICA,HYUNDAI,IONIQ 5,2024,1,Electric power steering assist loss,ELECTRICAL SYSTEM | POWER TRAIN,7,6,17.0173,0.35,0.0,0.71,0.43,0.43,Moderate signal
+"""
+
+
 def test_update_component_readme_replaces_marker_block():
     tmp_path = Path('data/outputs') / f'test_readme_{uuid.uuid4().hex}'
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -117,10 +145,18 @@ def test_update_component_readme_replaces_marker_block():
         severity_manifest = tmp_path / 'severity.json'
         severity_manifest.write_text(json.dumps(build_severity_manifest()), encoding='utf-8')
 
+        nlp_manifest = tmp_path / 'nlp.json'
+        nlp_manifest.write_text(json.dumps(build_nlp_manifest()), encoding='utf-8')
+
+        nlp_summary = tmp_path / 'nlp_watchlist_summary.csv'
+        nlp_summary.write_text(build_nlp_watchlist_summary(), encoding='utf-8')
+
         update_component_readme(
             single_manifest_path=single_manifest,
             multi_manifest_path=multi_manifest,
             severity_manifest_path=severity_manifest,
+            nlp_manifest_path=nlp_manifest,
+            nlp_watchlist_summary_path=nlp_summary,
             readme_path=readme_path,
             write_summary=False
         )
@@ -135,6 +171,11 @@ def test_update_component_readme_replaces_marker_block():
         assert '0.4571' in updated
         assert 'CatBoost MultiLabel' in updated
         assert '1200' in updated
+        assert 'NLP early-warning snapshot' in updated
+        assert 'official lemma-based NLP early-warning pipeline' in updated
+        assert 'Locked topic count: `20`' in updated
+        assert 'FORD F-150 2017' in updated
+        assert 'Transmission shifting / gear engagement issue' in updated
         assert 'old block' not in updated
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)

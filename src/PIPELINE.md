@@ -203,7 +203,7 @@ These are only written when `--summary` is passed and are kept as opt-in diagnos
 **Notes**
 
 - The Wave 2b calibration manifest remains a required reporting input for the single-label lift visual
-- README benchmark publishing is driven by the official severity, single-label, and multi-label manifests through `src/reporting/update_component_readme.py`
+- README benchmark publishing is driven by the official severity, component, and NLP early-warning artifacts through `src/reporting/update_component_readme.py`
 - The component benchmark summary CSV and JSON are derived from the official single-label and multi-label manifests
 
 ---

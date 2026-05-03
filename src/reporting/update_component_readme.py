@@ -2,11 +2,15 @@ import argparse
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from src.config.contracts import (
     COMPONENT_MULTI_OFFICIAL_MANIFEST,
     COMPONENT_OFFICIAL_SUMMARY_CSV,
     COMPONENT_OFFICIAL_SUMMARY_JSON,
     COMPONENT_SINGLE_OFFICIAL_MANIFEST,
+    NLP_EARLY_WARNING_OFFICIAL_MANIFEST,
+    NLP_EARLY_WARNING_WATCHLIST_SUMMARY,
     README_END,
     README_START,
     SEVERITY_URGENCY_OFFICIAL_MANIFEST,
@@ -108,6 +112,36 @@ def validate_severity_manifest(severity_manifest):
     return severity_manifest
 
 
+def validate_nlp_manifest(nlp_manifest):
+    manifest_name = NLP_EARLY_WARNING_OFFICIAL_MANIFEST
+    status = str(nlp_manifest.get('publish_status', '')).strip().lower()
+    if status not in ALLOWED_RELEASE_STATUSES:
+        allowed = ', '.join(sorted(ALLOWED_RELEASE_STATUSES))
+        raise ValueError(f"{manifest_name} must record publish_status as one of: {allowed}")
+
+    require_field(nlp_manifest, 'scope', manifest_name)
+    topic_model = require_dict(nlp_manifest, 'topic_model', manifest_name)
+    row_counts = require_dict(nlp_manifest, 'row_counts', manifest_name)
+    require_field(topic_model, 'locked_topic_k', manifest_name)
+    require_field(nlp_manifest, 'latest_watchlist_month', manifest_name)
+    require_field(row_counts, 'watchlist_rows', manifest_name)
+    require_field(row_counts, 'risk_monitor_rows', manifest_name)
+    require_field(row_counts, 'recurring_large_signal_rows', manifest_name)
+    return nlp_manifest
+
+
+def load_watchlist_summary(summary_path):
+    path = Path(summary_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Missing watchlist summary: {path}")
+
+    summary = pd.read_csv(path)
+    if 'month' not in summary.columns:
+        raise ValueError(f"{path.name} must contain a month column")
+    summary['month'] = pd.to_datetime(summary['month'])
+    return summary
+
+
 def build_severity_lines(severity_manifest):
     valid = severity_manifest['validation_metrics']['official']
     holdout = severity_manifest['holdout_metrics']['official']
@@ -166,6 +200,50 @@ def build_multi_lines(multi_manifest):
         f"- Release status: `{multi_manifest.get('promotion_status', 'n/a')}`",
         ''
     ]
+
+
+def build_nlp_lines(nlp_manifest, watchlist_summary):
+    topic_model = nlp_manifest['topic_model']
+    row_counts = nlp_manifest['row_counts']
+    latest_month = pd.to_datetime(nlp_manifest['latest_watchlist_month'])
+
+    lines = [
+        '#### NLP early-warning snapshot',
+        '',
+        f"- Scope: `{nlp_manifest.get('scope', 'n/a')}`",
+        f"- Locked topic count: `{topic_model.get('locked_topic_k', 'n/a')}`",
+        f"- Development window end: `{pd.to_datetime(nlp_manifest['time_windows']['development_end']).strftime('%Y-%m')}`",
+        f"- Forward watchlist window start: `{pd.to_datetime(nlp_manifest['time_windows']['forward_start']).strftime('%Y-%m')}`",
+        f"- Latest watchlist month: `{latest_month.strftime('%Y-%m')}`",
+        f"- Watchlist rows: `{int(row_counts.get('watchlist_rows', 0))}`",
+        f"- Risk monitor rows: `{int(row_counts.get('risk_monitor_rows', 0))}`",
+        f"- Recurring large-signal rows: `{int(row_counts.get('recurring_large_signal_rows', 0))}`",
+        ''
+    ]
+
+    latest = watchlist_summary.loc[watchlist_summary['month'] == latest_month].copy()
+    if latest.empty:
+        lines.extend(
+            [
+                '- Latest-month signal examples: `n/a`',
+                ''
+            ]
+        )
+        return lines
+
+    latest = latest.sort_values(
+        ['max_component_watchlist_score', 'complaints'],
+        ascending=[False, False]
+    ).drop_duplicates(subset=['topic_id']).head(3)
+
+    lines.append('Latest-month signal examples:')
+    for _, row in latest.iterrows():
+        cohort = f"{row['maketxt']} {row['modeltxt']} {int(row['yeartxt'])}"
+        lines.append(
+            f"- `{cohort}` | `{row['topic_label']}` | `{int(row['complaints'])}` complaints | `{row['best_signal_tier']}`"
+        )
+    lines.append('')
+    return lines
 
 
 def build_summary_rows(single_manifest=None, multi_manifest=None):
@@ -234,12 +312,12 @@ def write_summary_artifacts(single_manifest=None, multi_manifest=None, summary_c
     return csv_path, json_path
 
 
-def build_readme_block(severity_manifest=None, single_manifest=None, multi_manifest=None):
+def build_readme_block(severity_manifest=None, single_manifest=None, multi_manifest=None, nlp_manifest=None, nlp_watchlist_summary=None):
     lines = [
         README_START,
         '### Generated Benchmark Snapshot',
         '',
-        'This section is generated from the official severity and component benchmark artifacts in `data/outputs/`.',
+        'This section is generated from the official severity, component, and NLP early-warning artifacts in `data/outputs/`.',
         'Severity reports the locked primary-target urgency rule on `valid_2025` plus the `2026` reference check.',
         'The published component-model scores come from the untouched `2026` holdout.',
         ''
@@ -248,6 +326,8 @@ def build_readme_block(severity_manifest=None, single_manifest=None, multi_manif
         lines.extend(build_severity_lines(severity_manifest))
     lines.extend(build_single_lines(single_manifest))
     lines.extend(build_multi_lines(multi_manifest))
+    if nlp_manifest is not None and nlp_watchlist_summary is not None:
+        lines.extend(build_nlp_lines(nlp_manifest, nlp_watchlist_summary))
     lines.append(README_END)
     return '\n'.join(lines)
 
@@ -256,6 +336,8 @@ def update_component_readme(
     single_manifest_path=None,
     multi_manifest_path=None,
     severity_manifest_path=None,
+    nlp_manifest_path=None,
+    nlp_watchlist_summary_path=None,
     readme_path=None,
     write_summary=True
 ):
@@ -270,10 +352,18 @@ def update_component_readme(
     severity_manifest = None
     if severity_manifest_path is not None:
         severity_manifest = validate_severity_manifest(load_manifest(severity_manifest_path))
+    nlp_manifest = None
+    nlp_watchlist_summary = None
+    if nlp_manifest_path is not None:
+        nlp_manifest = validate_nlp_manifest(load_manifest(nlp_manifest_path))
+    if nlp_watchlist_summary_path is not None:
+        nlp_watchlist_summary = load_watchlist_summary(nlp_watchlist_summary_path)
     block = build_readme_block(
         severity_manifest=severity_manifest,
         single_manifest=single_manifest,
-        multi_manifest=multi_manifest
+        multi_manifest=multi_manifest,
+        nlp_manifest=nlp_manifest,
+        nlp_watchlist_summary=nlp_watchlist_summary
     )
 
     if README_START not in text or README_END not in text:
@@ -295,6 +385,8 @@ def parse_args():
     parser.add_argument('--single-manifest', default=None)
     parser.add_argument('--multi-manifest', default=None)
     parser.add_argument('--severity-manifest', default=str(OUTPUTS_DIR / SEVERITY_URGENCY_OFFICIAL_MANIFEST))
+    parser.add_argument('--nlp-manifest', default=str(OUTPUTS_DIR / NLP_EARLY_WARNING_OFFICIAL_MANIFEST))
+    parser.add_argument('--nlp-watchlist-summary', default=str(OUTPUTS_DIR / NLP_EARLY_WARNING_WATCHLIST_SUMMARY))
     parser.add_argument('--readme-path', default=None)
     parser.add_argument('--no-summary', action='store_true')
     return parser.parse_args()
@@ -306,6 +398,8 @@ def main():
         single_manifest_path=args.single_manifest,
         multi_manifest_path=args.multi_manifest,
         severity_manifest_path=args.severity_manifest,
+        nlp_manifest_path=args.nlp_manifest,
+        nlp_watchlist_summary_path=args.nlp_watchlist_summary,
         readme_path=args.readme_path,
         write_summary=not args.no_summary
     )
