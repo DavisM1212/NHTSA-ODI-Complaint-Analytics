@@ -2,21 +2,43 @@
 
 Professional-grade data science repository for analyzing National Highway Traffic Safety Administration (NHTSA) Office of Defects Investigation (ODI) consumer complaint data. The repository is built around a locked final modeling and reporting surface for complaint severity triage, component routing, and NLP early-warning signal monitoring.
 
+[![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](#how-to-run-the-official-pipelines) [![Data](https://img.shields.io/badge/Data-NHTSA%20ODI%20Complaints-0A7E8C)](#data-foundation-and-interpretation) [![Locked Systems](https://img.shields.io/badge/Locked%20Systems-3%20Model%20Tracks-2E8B57)](#locked-systems) [![Reporting](https://img.shields.io/badge/Reporting-Figures%20%7C%20Tables%20%7C%20Manifests-8B5A2B)](#key-outputs-and-figures)
+
+| Dimension | Summary |
+| --- | --- |
+| Objective | Turn ODI complaint data into reproducible severity triage, component-routing, and NLP early-warning outputs |
+| Data Window | 2020-2026 ODI complaint source files with time-aware development, validation, and holdout framing |
+| Locked Systems | Severity urgency scoring, component routing, and NLP early-warning watchlists |
+| Key Deliverables | Official manifests, benchmark tables, watchlists, recurring-signal summaries, and presentation-ready figures |
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Locked Systems](#locked-systems)
+- [Generated Benchmark Snapshot](#generated-benchmark-snapshot)
+- [Key Outputs And Figures](#key-outputs-and-figures)
+- [Data Foundation And Interpretation](#data-foundation-and-interpretation)
+- [How To Run The Official Pipelines](#how-to-run-the-official-pipelines)
+- [Main Notebooks](#main-notebooks)
+- [Repository Structure](#repository-structure)
+- [Additional References](#additional-references)
+
 ## Overview
 
-This repository turns raw ODI complaint files into reproducible processed tables, official model artifacts, and presentation-ready reporting outputs. The final supported surface includes:
+This repository packages the ODI complaint workflow as a final end-to-end analytics product, with supporting initial exploratory notebooks. Raw complaint files are ingested, cleaned into task-specific tables, scored through three locked modeling systems, and published as benchmark artifacts, watchlists, and presentation-ready figures.
 
-- a complaint-level severity urgency model for review prioritization
-- single-label and multi-label component-routing models
-- an NLP early-warning system for emerging and recurring cohort-topic signals
-- figure sets and generated benchmark summaries for reporting and presentation use
+The final supported surface is designed to answer three practical questions:
 
-The repo follows a four-stage pipeline:
+- which complaints should move to the front of a limited review queue
+- which vehicle component groups are most likely implicated by a complaint
+- which complaint-topic cohorts are emerging or recurring strongly enough to monitor over time
+
+The pipeline contract is intentionally simple:
 
 1. ingest complaint source files from `data/raw/`
 2. build cleaned and task-specific tables in `data/processed/`
 3. run the locked official modeling pipelines
-4. generate reporting artifacts in `data/outputs/` and `docs/figures/`
+4. publish reporting artifacts in `data/outputs/` and `docs/figures/`
 
 ## Locked Systems
 
@@ -119,31 +141,46 @@ Latest-month signal examples:
 
 <!-- COMPONENT_BENCHMARK_END -->
 
-## Official Deliverables
+## Key Outputs And Figures
 
-### Core artifact surface
+### Canonical output surface
 
-- processed complaint and task tables under `data/processed/`
-- official model manifests and benchmark artifacts under `data/outputs/`
-- canonical benchmark summary tables:
-  - `data/outputs/component_official_benchmark_summary.csv`
-  - `data/outputs/component_official_benchmark_summary.json`
-- canonical NLP reporting CSVs:
-  - `data/outputs/nlp_early_warning_topic_model_scan.csv`
-  - `data/outputs/nlp_early_warning_topic_library.csv`
-  - `data/outputs/nlp_early_warning_watchlist.csv`
-  - `data/outputs/nlp_early_warning_watchlist_summary.csv`
-  - `data/outputs/nlp_early_warning_risk_monitor.csv`
-  - `data/outputs/nlp_early_warning_recurring_large_signals.csv`
-  - `data/outputs/nlp_early_warning_terms.csv`
+| System | Primary committed outputs | What they provide |
+| --- | --- | --- |
+| Severity urgency scoring | `severity_urgency_official_manifest.json`, `severity_urgency_official_metrics.csv`, `severity_urgency_official_review_budgets.csv`, `severity_urgency_official_calibration.csv` | Locked urgency benchmark, calibration evidence, and practical review-budget tradeoffs |
+| Component routing | `component_single_label_official_manifest.json`, `component_multilabel_official_manifest.json`, `component_official_benchmark_summary.csv`, `component_official_benchmark_summary.json` | Locked single-label and multi-label routing benchmarks plus a compact reporting summary |
+| NLP early-warning | `nlp_early_warning_official_manifest.json`, `nlp_early_warning_topic_library.csv`, `nlp_early_warning_watchlist.csv`, `nlp_early_warning_watchlist_summary.csv`, `nlp_early_warning_risk_monitor.csv`, `nlp_early_warning_recurring_large_signals.csv`, `nlp_early_warning_terms.csv` | Topic monitoring, monthly emerging-signal triage, persistent-risk views, and interpretation support |
 
-### Figure surface
+### Reporting surface
 
-- component figures: `docs/figures/component_models/`
-- severity figures: `docs/figures/severity_model/`
-- NLP early-warning figures: `docs/figures/nlp_early_warning/`
+| Surface | Canonical location | Notes |
+| --- | --- | --- |
+| Component figures | `docs/figures/component_models/` | Benchmark summary, lift, class-F1, calibration, and confusion visuals |
+| Severity figures | `docs/figures/severity_model/` | Baseline-vs-official comparison, review-budget tradeoff, calibration, and split-context visuals |
+| NLP figures | `docs/figures/nlp_early_warning/` | Latest watchlist leaderboard, topic mix, topic-share shift, recurring signals, and recent signal flow |
+| Generated benchmark summary | `README.md` benchmark block | Refreshed from official severity, component, and NLP artifacts |
 
-The committed figure surface is the reader-facing reporting layer. Large audit artifacts such as `data/outputs/nlp_early_warning_complaint_topics.parquet` remain generated local outputs and are not committed by default.
+The committed figure and CSV surface is the reader-facing reporting layer. Large audit artifacts such as `data/outputs/nlp_early_warning_complaint_topics.parquet` remain generated local outputs and are not committed by default.
+
+### Selected figures
+
+#### Component benchmark summary
+
+![Component benchmark summary](docs/figures/component_models/component_official_benchmark_summary.png)
+
+This figure is the quickest view of the locked component-routing surface and the relative strength of the single-label and multi-label benchmarks.
+
+#### Severity urgency benchmark
+
+![Severity official vs baseline](docs/figures/severity_model/severity_official_vs_baseline.png)
+
+This figure shows the official severity model against the baseline on the locked validation and holdout views, making the review-prioritization lift easy to interpret.
+
+#### NLP early-warning leaderboard
+
+![NLP watchlist latest leaderboard](docs/figures/nlp_early_warning/nlp_watchlist_latest_leaderboard.png)
+
+This figure shows the highest-priority current cohort-topic signals in the official NLP watchlist, including size, strength, and geographic spread.
 
 ## Data Foundation And Interpretation
 
